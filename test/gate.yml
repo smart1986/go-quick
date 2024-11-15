@@ -1,0 +1,9 @@
+server:
+  addr: ':20000'
+log:
+  level: 'debug'
+  fileEnable : false
+etcd:
+  endpoints:
+    - 127.0.0.1:2379
+  timeout: 2
