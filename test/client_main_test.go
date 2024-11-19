@@ -4,6 +4,7 @@ import (
 	"github.com/smart1986/go-quick/config"
 	"github.com/smart1986/go-quick/logger"
 	"github.com/smart1986/go-quick/network"
+	"github.com/smart1986/go-quick/system"
 	"testing"
 )
 
@@ -27,9 +28,9 @@ func TestClient(t *testing.T) {
 	if err1 != nil {
 		logger.Info("Error sending message:", err1)
 	}
-	// 使用信号通道来阻塞主线程
-	done := make(chan struct{})
-	<-done
+	system.WaitElegantExit(func() {
+		connector.Close()
+	})
 }
 
 func test(message *network.DataMessage) {

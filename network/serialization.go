@@ -40,7 +40,7 @@ func (dm *DefaultHandlerPacket) HandlePacket(conn net.Conn) ([]byte, bool) {
 		n, err := conn.Read(header[totalRead:])
 		if err != nil {
 			if err == io.EOF {
-				logger.Debug("Client disconnected:", conn.RemoteAddr())
+				logger.Debug("ConnectContext disconnected:", conn.RemoteAddr())
 			} else {
 				logger.Debug("Error reading header:", err)
 			}
@@ -66,7 +66,7 @@ func (dm *DefaultHandlerPacket) HandlePacket(conn net.Conn) ([]byte, bool) {
 		n, err := conn.Read(body[totalRead:])
 		if err != nil {
 			if err == io.EOF {
-				logger.Debug("Client disconnected:", conn.RemoteAddr())
+				logger.Debug("ConnectContext disconnected:", conn.RemoteAddr())
 			} else {
 				logger.Error("Error reading body:", err)
 			}

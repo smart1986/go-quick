@@ -8,6 +8,7 @@ import (
 	"github.com/smart1986/go-quick/util"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestGate(t *testing.T) {
@@ -24,11 +25,11 @@ func TestGate(t *testing.T) {
 	CreateClientPoolFromEtcd("game", 1)
 
 	tcpNet := network.TcpServer{
-		UseHeartBeat:        true,
 		SocketHandlerPacket: &network.DefaultHandlerPacket{},
 		Encoder:             &Gate2ClientEncoder{},
 		Decoder:             &network.DefaultDecoder{},
 		Router:              &GateRouter{},
+		IdleTimeout:         1 * time.Minute,
 	}
 
 	tcpNet.Start(config.GlobalConfig)

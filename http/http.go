@@ -4,6 +4,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/smart1986/go-quick/logger"
 	"strings"
+	"time"
 )
 
 var AllRoutes []*Route
@@ -22,6 +23,7 @@ type IAuthMiddleware interface {
 func Init(addr string, authMiddleware IAuthMiddleware, block bool) {
 
 	Energy = gin.Default()
+	Energy.Use(logRequestParams())
 	protected := Energy.Group("/")
 	protected.Use(authMiddleware.AuthMiddleware())
 	for _, route := range AllRoutes {
@@ -47,6 +49,27 @@ func Init(addr string, authMiddleware IAuthMiddleware, block bool) {
 		}()
 	}
 }
+
+func logRequestParams() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		// 记录请求时间
+		start := time.Now()
+
+		// 打印请求信息
+		reqBody, _ := c.GetRawData()
+		logger.Debugf("Request: %s %s %s\n", c.Request.Method, c.Request.RequestURI, reqBody)
+
+		// 执行请求处理程序和其他中间件函数
+		c.Next()
+
+		// 记录回包内容和处理时间
+		end := time.Now()
+		latency := end.Sub(start)
+		//respBody := string(c.Writer.Body.Bytes())
+		logger.Debugf(" Response: %s %s %s \n", c.Request.Method, c.Request.RequestURI, latency)
+	}
+}
+
 func InitNoAuth(addr string, block bool) {
 
 	Energy = gin.Default()

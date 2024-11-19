@@ -8,11 +8,11 @@ var MessageHandler = make(map[int32]MessageExecutor)
 
 type (
 	Router interface {
-		Route(c *Client, dataMessage *DataMessage)
+		Route(c *ConnectContext, dataMessage *DataMessage)
 	}
 
 	MessageExecutor interface {
-		Execute(c *Client, dataMessage *DataMessage) *DataMessage
+		Execute(c *ConnectContext, dataMessage *DataMessage) *DataMessage
 		MsgId() int32
 	}
 
@@ -29,7 +29,7 @@ func RegisterMessageHandler(handler MessageExecutor) {
 	MessageHandler[msgId] = handler
 }
 
-func (r *MessageRouter) Route(c *Client, dataMessage *DataMessage) {
+func (r *MessageRouter) Route(c *ConnectContext, dataMessage *DataMessage) {
 	header := dataMessage.Header.(IDataHeader)
 	if handler, existsHandler := MessageHandler[header.GetMsgId()]; existsHandler {
 		response := handler.Execute(c, dataMessage)

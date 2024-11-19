@@ -15,7 +15,6 @@ func TestGameServer(tt *testing.T) {
 	third.InitEtcd("game", "192.168.0.106:8080", "", nil)
 	//}()
 	tcpNet := network.TcpServer{
-		UseHeartBeat:        false,
 		SocketHandlerPacket: &network.DefaultHandlerPacket{},
 		Encoder:             &Gate2GameEncoder{},
 		Decoder:             &Game2GateDecoder{},
@@ -33,7 +32,7 @@ type (
 	//GameMessageRouter     struct{}
 )
 
-func (receiver *GameTestServerHandler) Execute(c *network.Client, dataMessage *network.DataMessage) *network.DataMessage {
+func (receiver *GameTestServerHandler) Execute(c *network.ConnectContext, dataMessage *network.DataMessage) *network.DataMessage {
 	logger.Debug("Received message:", dataMessage)
 	c.SendMessage(dataMessage)
 	return nil
@@ -42,7 +41,7 @@ func (receiver *GameTestServerHandler) MsgId() int32 {
 	return 1
 }
 
-//func (r *GameMessageRouter) Route(c *network.Client, dataMessage *network.DataMessage) {
+//func (r *GameMessageRouter) Route(c *network.ConnectContext, dataMessage *network.DataMessage) {
 //	header := dataMessage.Header.(*GateDataHeader)
 //	if handler, existsHandler := network.MessageHandler[header.MsgId]; existsHandler {
 //		response := handler.Execute(c, dataMessage)

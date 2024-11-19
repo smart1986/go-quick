@@ -6,6 +6,7 @@ import (
 	"github.com/smart1986/go-quick/logger"
 	"github.com/smart1986/go-quick/network"
 	"testing"
+	"time"
 )
 
 func TestServer(tt *testing.T) {
@@ -15,10 +16,11 @@ func TestServer(tt *testing.T) {
 	third.InitEtcd("/test/", "192.168.0.106", "", nil)
 	//}()
 	tcpNet := network.TcpServer{
-		UseHeartBeat:        true,
 		SocketHandlerPacket: &network.DefaultHandlerPacket{},
 		Encoder:             &network.DefaultEncoder{},
 		Decoder:             &network.DefaultDecoder{},
+		Router:              &network.MessageRouter{},
+		IdleTimeout:         1 * time.Minute,
 	}
 
 	t := &TestServerHandler{}
@@ -31,7 +33,7 @@ type (
 	TestServerHandler struct{}
 )
 
-func (receiver *TestServerHandler) Execute(c *network.Client, dataMessage *network.DataMessage) *network.DataMessage {
+func (receiver *TestServerHandler) Execute(c *network.ConnectContext, dataMessage *network.DataMessage) *network.DataMessage {
 	logger.Info("Received message:", dataMessage)
 	c.SendMessage(dataMessage)
 	return nil

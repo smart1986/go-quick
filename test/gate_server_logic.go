@@ -3,6 +3,7 @@ package mytest
 import (
 	"bytes"
 	"encoding/binary"
+	"github.com/google/uuid"
 	third "github.com/smart1986/go-quick/3rd"
 	"github.com/smart1986/go-quick/logger"
 	"github.com/smart1986/go-quick/network"
@@ -15,7 +16,7 @@ type (
 	GateRouter     struct{}
 	GateDataHeader struct {
 		*network.DataHeader
-		ActorId int64
+		ConnectId []byte
 	}
 	Gate2GameEncoder   struct{}
 	Game2GateDecoder   struct{}
@@ -91,12 +92,20 @@ func gameServerHandler(message *network.DataMessage) {
 	logger.Debug("Received message:", message)
 	logger.Debug("Received message content:", string(message.Msg))
 	header := message.Header.(*GateDataHeader)
-	if client, exists := network.Clients[header.ActorId]; exists {
-		client.SendMessage(message)
+
+	id, err := uuid.FromBytes(header.ConnectId)
+	if err != nil {
+		logger.Error("Invalid UUID:", err)
+		return
+	}
+
+	uuid.NewString()
+	if client, exists := network.Clients.Load(id.String()); exists {
+		client.(*network.ConnectContext).SendMessage(message)
 	}
 }
 
-func (g *GateRouter) Route(c *network.Client, dataMessage *network.DataMessage) {
+func (g *GateRouter) Route(c *network.ConnectContext, dataMessage *network.DataMessage) {
 	// Connects中随机一个
 	Connects := ConnectsMap["game"]
 	if len(Connects) == 0 {
@@ -108,7 +117,7 @@ func (g *GateRouter) Route(c *network.Client, dataMessage *network.DataMessage) 
 	connect := Connects[randomIndex]
 	oldHeader := dataMessage.Header.(*network.DataHeader)
 	dataMessage.Header = &GateDataHeader{
-		ActorId:    c.ConnectId,
+		ConnectId:  c.ConnectId[:],
 		DataHeader: oldHeader,
 	}
 	err := connect.SendMessage(dataMessage)
@@ -122,14 +131,13 @@ func (g *GateRouter) Route(c *network.Client, dataMessage *network.DataMessage) 
 
 func (g2gEncoder *Gate2GameEncoder) Encode(d *network.DataMessage) []byte {
 	buf := new(bytes.Buffer)
-	data := make([]byte, 4+2+8+len(d.Msg))
+	data := make([]byte, 4+2+16+len(d.Msg))
 	header := d.Header.(*GateDataHeader)
 
 	binary.BigEndian.PutUint32(data[0:4], uint32(header.DataHeader.MsgId))
 	binary.BigEndian.PutUint16(data[4:6], uint16(header.DataHeader.Code))
-	binary.BigEndian.PutUint64(data[6:14], uint64(header.ActorId))
-
-	copy(data[14:], d.Msg)
+	copy(data[6:22], header.ConnectId)
+	copy(data[22:], d.Msg)
 	buf.Write(data)
 	return buf.Bytes()
 }
@@ -159,18 +167,18 @@ func (g2gDecoder *Game2GateDecoder) Decode(array []byte) *network.DataMessage {
 		return nil
 	}
 
-	var actorId int64
-	if err := binary.Read(buf, binary.BigEndian, &actorId); err != nil {
+	connectId := make([]byte, 16)
+	if _, err := buf.Read(connectId); err != nil {
 		return nil
 	}
 
-	msgLength := int32(len(array) - 14)
+	msgLength := int32(len(array) - 22)
 	msg := make([]byte, msgLength)
 	if err := binary.Read(buf, binary.BigEndian, msg); err != nil {
 		return nil
 	}
 	header := &GateDataHeader{
-		ActorId: actorId,
+		ConnectId: connectId,
 		DataHeader: &network.DataHeader{
 			MsgId: msgId,
 			Code:  code,
