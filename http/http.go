@@ -1,8 +1,10 @@
 package http
 
 import (
+	"bytes"
 	"github.com/gin-gonic/gin"
 	"github.com/smart1986/go-quick/logger"
+	"io"
 	"strings"
 	"time"
 )
@@ -58,7 +60,7 @@ func logRequestParams() gin.HandlerFunc {
 		// 打印请求信息
 		reqBody, _ := c.GetRawData()
 		logger.Debugf("Request: %s %s %s\n", c.Request.Method, c.Request.RequestURI, reqBody)
-
+		c.Request.Body = io.NopCloser(bytes.NewBuffer(reqBody))
 		// 执行请求处理程序和其他中间件函数
 		c.Next()
 
