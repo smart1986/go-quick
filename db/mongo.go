@@ -85,9 +85,9 @@ func GetNextSequence(sequenceName string) (int64, error) {
 		return 0, err
 	}
 
-	// 如果计数器是新创建的，初始化为 9999
+	// 如果计数器是新创建的，初始化为 10000
 	if result.Seq == 1 {
-		_, err = collection.UpdateOne(context.Background(), filter, bson.M{"$set": bson.M{"seq": 9999}})
+		_, err = collection.UpdateOne(context.Background(), filter, bson.M{"$set": bson.M{"seq": 10000}})
 		if err != nil {
 			logger.Errorf("Failed to initialize sequence for %s: %v", sequenceName, err)
 			return 0, err
