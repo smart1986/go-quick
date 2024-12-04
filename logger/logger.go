@@ -28,12 +28,9 @@ func NewLoggerOfTimeOffset(c *config.Config, timeOffsetHandler ITimeOffset) {
 	}
 	encoderConfig := zap.NewProductionEncoderConfig()
 	encoderConfig.TimeKey = "timestamp"
-	if timeOffset <= 0 {
-		encoderConfig.EncodeTime = zapcore.TimeEncoderOfLayout("2006-01-02 15:04:05.000")
-	} else {
-
-		encoderConfig.EncodeTime = func(t time.Time, enc zapcore.PrimitiveArrayEncoder) {
-			enc.AppendString(t.Format("2006-01-02 15:04:05.000"))
+	encoderConfig.EncodeTime = func(t time.Time, enc zapcore.PrimitiveArrayEncoder) {
+		enc.AppendString(t.Format("2006-01-02 15:04:05.000"))
+		if timeOffset > 0 {
 			offsetTime := t.Add(time.Duration(timeOffset) * time.Second)
 			enc.AppendString("[" + offsetTime.Format("2006-01-02 15:04:05.000") + "]")
 		}
