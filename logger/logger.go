@@ -8,16 +8,36 @@ import (
 	"log"
 	"os"
 	"strings"
+	"time"
 )
 
 var Logger *zap.SugaredLogger
 
-func NewLogger(c *config.Config) {
-	// Lumberjack configuration for file logging
+type ITimeOffset interface {
+	GetTimeOffset() int64
+}
 
+func NewLogger(c *config.Config) {
+	NewLoggerOfTimeOffset(c, nil)
+}
+func NewLoggerOfTimeOffset(c *config.Config, timeOffsetHandler ITimeOffset) {
+	// Lumberjack configuration for file logging
+	timeOffset := int64(0)
+	if timeOffsetHandler != nil {
+		timeOffset = timeOffsetHandler.GetTimeOffset()
+	}
 	encoderConfig := zap.NewProductionEncoderConfig()
 	encoderConfig.TimeKey = "timestamp"
-	encoderConfig.EncodeTime = zapcore.TimeEncoderOfLayout("2006-01-02 15:04:05.000")
+	if timeOffset <= 0 {
+		encoderConfig.EncodeTime = zapcore.TimeEncoderOfLayout("2006-01-02 15:04:05.000")
+	} else {
+
+		encoderConfig.EncodeTime = func(t time.Time, enc zapcore.PrimitiveArrayEncoder) {
+			enc.AppendString(t.Format("2006-01-02 15:04:05.000"))
+			offsetTime := t.Add(time.Duration(timeOffset) * time.Second)
+			enc.AppendString("[" + offsetTime.Format("2006-01-02 15:04:05.000") + "]")
+		}
+	}
 	encoderConfig.CallerKey = "caller"
 
 	zapLevel := zap.InfoLevel
