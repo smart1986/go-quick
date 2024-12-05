@@ -10,6 +10,7 @@ import (
 )
 
 type HttpServer struct {
+	Name      string
 	AllRoutes []*Route
 	Energy    *gin.Engine
 }
@@ -38,14 +39,14 @@ func (httpServer *HttpServer) Init(addr string, authMiddleware IAuthMiddleware, 
 		}
 	}
 	if block {
-		logger.Info("HTTP server started at", addr)
+		logger.Info(httpServer.Name, "HTTP server started at", addr)
 		err := httpServer.Energy.Run(addr)
 		if err != nil {
 			return
 		}
 	} else {
 		go func() {
-			logger.Info("HTTP server started at", addr)
+			logger.Info(httpServer.Name, " HTTP server started at", addr)
 			err := httpServer.Energy.Run(addr)
 			if err != nil {
 				return
@@ -81,14 +82,14 @@ func (httpServer *HttpServer) InitNoAuth(addr string, block bool) {
 		registerRoutes(nil, route, httpServer)
 	}
 	if block {
-		logger.Info("HTTP server started at", addr)
+		logger.Info(httpServer.Name, "HTTP server started at", addr)
 		err := httpServer.Energy.Run(addr)
 		if err != nil {
 			return
 		}
 	} else {
 		go func() {
-			logger.Info("HTTP server started at", addr)
+			logger.Info(httpServer.Name, "HTTP server started at", addr)
 			err := httpServer.Energy.Run(addr)
 			if err != nil {
 				return
@@ -137,6 +138,6 @@ func registerRoutes(group *gin.RouterGroup, route *Route, httpServer *HttpServer
 			logger.Error("Invalid HTTP method", "method", route.Method)
 		}
 	}
-	logger.Info("Route registered ,method:", route.Method, ",path:", route.Path)
+	logger.Info(httpServer.Name, " Route registered ,method:", route.Method, ",path:", route.Path)
 
 }
