@@ -1,4 +1,4 @@
-package http
+package quickhttp
 
 import (
 	"bytes"
@@ -9,8 +9,10 @@ import (
 	"time"
 )
 
-var AllRoutes []*Route
-var Energy *gin.Engine
+type HttpServer struct {
+	AllRoutes []*Route
+	Energy    *gin.Engine
+}
 
 type Route struct {
 	Path      string
@@ -22,29 +24,29 @@ type IAuthMiddleware interface {
 	AuthMiddleware() gin.HandlerFunc
 }
 
-func Init(addr string, authMiddleware IAuthMiddleware, block bool) {
+func (httpServer *HttpServer) Init(addr string, authMiddleware IAuthMiddleware, block bool) {
 
-	Energy = gin.Default()
-	Energy.Use(logRequestParams())
-	protected := Energy.Group("/")
+	httpServer.Energy = gin.Default()
+	httpServer.Energy.Use(logRequestParams())
+	protected := httpServer.Energy.Group("/")
 	protected.Use(authMiddleware.AuthMiddleware())
-	for _, route := range AllRoutes {
+	for _, route := range httpServer.AllRoutes {
 		if route.Protected {
-			registerRoutes(protected, route)
+			registerRoutes(protected, route, httpServer)
 		} else {
-			registerRoutes(nil, route)
+			registerRoutes(nil, route, httpServer)
 		}
 	}
 	if block {
 		logger.Info("HTTP server started at", addr)
-		err := Energy.Run(addr)
+		err := httpServer.Energy.Run(addr)
 		if err != nil {
 			return
 		}
 	} else {
 		go func() {
 			logger.Info("HTTP server started at", addr)
-			err := Energy.Run(addr)
+			err := httpServer.Energy.Run(addr)
 			if err != nil {
 				return
 			}
@@ -72,22 +74,22 @@ func logRequestParams() gin.HandlerFunc {
 	}
 }
 
-func InitNoAuth(addr string, block bool) {
+func (httpServer *HttpServer) InitNoAuth(addr string, block bool) {
 
-	Energy = gin.Default()
-	for _, route := range AllRoutes {
-		registerRoutes(nil, route)
+	httpServer.Energy = gin.Default()
+	for _, route := range httpServer.AllRoutes {
+		registerRoutes(nil, route, httpServer)
 	}
 	if block {
 		logger.Info("HTTP server started at", addr)
-		err := Energy.Run(addr)
+		err := httpServer.Energy.Run(addr)
 		if err != nil {
 			return
 		}
 	} else {
 		go func() {
 			logger.Info("HTTP server started at", addr)
-			err := Energy.Run(addr)
+			err := httpServer.Energy.Run(addr)
 			if err != nil {
 				return
 			}
@@ -95,29 +97,29 @@ func InitNoAuth(addr string, block bool) {
 	}
 }
 
-func RegisterRoute(path string, method string, handler gin.HandlerFunc, protected bool) {
+func (httpServer *HttpServer) RegisterRoute(path string, method string, handler gin.HandlerFunc, protected bool) {
 	route := &Route{
 		Path:      path,
 		Method:    method,
 		Handler:   handler,
 		Protected: protected,
 	}
-	AllRoutes = append(AllRoutes, route)
+	httpServer.AllRoutes = append(httpServer.AllRoutes, route)
 }
 
 // RegisterRoutes 注册路由到 Gin Engine
-func registerRoutes(group *gin.RouterGroup, route *Route) {
+func registerRoutes(group *gin.RouterGroup, route *Route, httpServer *HttpServer) {
 	method := strings.ToUpper(route.Method)
 	if group == nil {
 		switch method {
 		case "GET":
-			Energy.GET(route.Path, route.Handler)
+			httpServer.Energy.GET(route.Path, route.Handler)
 		case "POST":
-			Energy.POST(route.Path, route.Handler)
+			httpServer.Energy.POST(route.Path, route.Handler)
 		case "PUT":
-			Energy.PUT(route.Path, route.Handler)
+			httpServer.Energy.PUT(route.Path, route.Handler)
 		case "DELETE":
-			Energy.DELETE(route.Path, route.Handler)
+			httpServer.Energy.DELETE(route.Path, route.Handler)
 		default:
 			logger.Error("Invalid HTTP method", "method", route.Method)
 		}
