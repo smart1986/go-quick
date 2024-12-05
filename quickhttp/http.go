@@ -39,7 +39,7 @@ func (httpServer *HttpServer) Init(addr string, authMiddleware IAuthMiddleware, 
 		}
 	}
 	if block {
-		logger.Info(httpServer.Name, "HTTP server started at", addr)
+		logger.Info(httpServer.Name, " HTTP server started at", addr)
 		err := httpServer.Energy.Run(addr)
 		if err != nil {
 			return
@@ -82,14 +82,14 @@ func (httpServer *HttpServer) InitNoAuth(addr string, block bool) {
 		registerRoutes(nil, route, httpServer)
 	}
 	if block {
-		logger.Info(httpServer.Name, "HTTP server started at", addr)
+		logger.Info(httpServer.Name, " HTTP server started at", addr)
 		err := httpServer.Energy.Run(addr)
 		if err != nil {
 			return
 		}
 	} else {
 		go func() {
-			logger.Info(httpServer.Name, "HTTP server started at", addr)
+			logger.Info(httpServer.Name, " HTTP server started at", addr)
 			err := httpServer.Energy.Run(addr)
 			if err != nil {
 				return
@@ -122,7 +122,7 @@ func registerRoutes(group *gin.RouterGroup, route *Route, httpServer *HttpServer
 		case "DELETE":
 			httpServer.Energy.DELETE(route.Path, route.Handler)
 		default:
-			logger.Error("Invalid HTTP method", "method", route.Method)
+			logger.Error(httpServer.Name, " Invalid HTTP method", "method", route.Method)
 		}
 	} else {
 		switch method {
@@ -135,7 +135,7 @@ func registerRoutes(group *gin.RouterGroup, route *Route, httpServer *HttpServer
 		case "DELETE":
 			group.DELETE(route.Path, route.Handler)
 		default:
-			logger.Error("Invalid HTTP method", "method", route.Method)
+			logger.Error(httpServer.Name, " Invalid HTTP method", "method", route.Method)
 		}
 	}
 	logger.Info(httpServer.Name, " Route registered ,method:", route.Method, ",path:", route.Path)
