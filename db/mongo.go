@@ -69,31 +69,46 @@ func (m *MongoDB) Get(connectionName string) *mongo.Collection {
 	return m.MongoClient.Database(config.GlobalConfig.Mongo.Database).Collection(connectionName)
 }
 
-func GetNextSequence(sequenceName string) (int64, error) {
-	collection := MongoInstance.Get("counters")
-	filter := bson.M{"_id": sequenceName}
-	update := bson.M{"$inc": bson.M{"seq": 1}}
-	opts := options.FindOneAndUpdate().SetReturnDocument(options.After).SetUpsert(true)
-
-	var result struct {
-		Seq int64 `bson:"seq"`
-	}
-
-	err := collection.FindOneAndUpdate(context.Background(), filter, update, opts).Decode(&result)
+func GetNextSequence(sequenceName string, initNum int64) (int64, error) {
+	session, err := MongoInstance.MongoClient.StartSession()
 	if err != nil {
-		logger.Errorf("Failed to get next sequence for %s: %v", sequenceName, err)
+		logger.Errorf("Failed to start session: %v", err)
+		return 0, err
+	}
+	defer session.EndSession(context.Background())
+
+	result, err := session.WithTransaction(context.Background(), func(sessCtx mongo.SessionContext) (interface{}, error) {
+		collection := MongoInstance.Get("counters")
+		filter := bson.M{"_id": sequenceName}
+		update := bson.M{"$inc": bson.M{"seq": 1}}
+		opts := options.FindOneAndUpdate().SetReturnDocument(options.After).SetUpsert(true)
+
+		var result struct {
+			Seq int64 `bson:"seq"`
+		}
+
+		err := collection.FindOneAndUpdate(sessCtx, filter, update, opts).Decode(&result)
+		if err != nil {
+			logger.Errorf("Failed to get next sequence for %s: %v", sequenceName, err)
+			return nil, err
+		}
+
+		// 如果计数器是新创建的，初始化为 initNum
+		if result.Seq == 1 {
+			_, err = collection.UpdateOne(sessCtx, filter, bson.M{"$set": bson.M{"seq": initNum}})
+			if err != nil {
+				logger.Errorf("Failed to initialize sequence for %s: %v", sequenceName, err)
+				return nil, err
+			}
+			return initNum, nil
+		}
+
+		return result.Seq, nil
+	})
+
+	if err != nil {
 		return 0, err
 	}
 
-	// 如果计数器是新创建的，初始化为 10000
-	if result.Seq == 1 {
-		_, err = collection.UpdateOne(context.Background(), filter, bson.M{"$set": bson.M{"seq": 10000}})
-		if err != nil {
-			logger.Errorf("Failed to initialize sequence for %s: %v", sequenceName, err)
-			return 0, err
-		}
-		return 10000, nil
-	}
-
-	return result.Seq, nil
+	return result.(int64), nil
 }
