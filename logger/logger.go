@@ -147,6 +147,9 @@ func Warn(args ...interface{}) {
 func Error(args ...interface{}) {
 	Logger.Desugar().WithOptions(zap.AddCallerSkip(1)).Sugar().Error(args...)
 }
+func ErrorWithStack(args ...interface{}) {
+	Logger.Desugar().WithOptions(zap.AddCallerSkip(1)).Sugar().Errorw("error", "args", args, "stacktrace", zap.Stack("stack"))
+}
 
 func Debugf(template string, args ...interface{}) {
 	Logger.Desugar().WithOptions(zap.AddCallerSkip(1)).Sugar().Debugf(template, args...)
@@ -162,4 +165,7 @@ func Warnf(template string, args ...interface{}) {
 
 func Errorf(template string, args ...interface{}) {
 	Logger.Desugar().WithOptions(zap.AddCallerSkip(1)).Sugar().Errorf(template, args...)
+}
+func ErrorfWithStack(template string, args ...interface{}) {
+	Logger.Desugar().WithOptions(zap.AddCallerSkip(1)).Sugar().Errorw("error", "template", template, "args", args, "stacktrace", zap.Stack("stack"))
 }
