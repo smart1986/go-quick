@@ -21,16 +21,21 @@ type Route struct {
 	Handler   gin.HandlerFunc
 	Protected bool
 }
-type IAuthMiddleware interface {
-	AuthMiddleware() gin.HandlerFunc
+type IMiddleware interface {
+	Middleware() gin.HandlerFunc
 }
 
-func (httpServer *HttpServer) Init(addr string, authMiddleware IAuthMiddleware, block bool) {
+func (httpServer *HttpServer) Init(addr string, middleware []IMiddleware, block bool) {
 
 	httpServer.Energy = gin.Default()
 	httpServer.Energy.Use(logRequestParams())
 	protected := httpServer.Energy.Group("/")
-	protected.Use(authMiddleware.AuthMiddleware())
+	if middleware != nil {
+		for _, middleware := range middleware {
+			protected.Use(middleware.Middleware())
+		}
+	}
+
 	for _, route := range httpServer.AllRoutes {
 		if route.Protected {
 			registerRoutes(protected, route, httpServer)
