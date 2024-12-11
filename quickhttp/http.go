@@ -25,16 +25,17 @@ type IMiddleware interface {
 	Middleware() gin.HandlerFunc
 }
 
-func (httpServer *HttpServer) Init(addr string, middleware []IMiddleware, block bool) {
+func (httpServer *HttpServer) Init(addr string, auth IMiddleware, block bool, middleware ...IMiddleware) {
 
 	httpServer.Energy = gin.Default()
-	httpServer.Energy.Use(logRequestParams())
-	protected := httpServer.Energy.Group("/")
-	if middleware != nil {
-		for _, middleware := range middleware {
-			protected.Use(middleware.Middleware())
-		}
+	var middlewareList []gin.HandlerFunc
+	for _, m := range middleware {
+		middlewareList = append(middlewareList, m.Middleware())
 	}
+	middlewareList = append(middlewareList, logRequestParams())
+	httpServer.Energy.Use(middlewareList...)
+	protected := httpServer.Energy.Group("/")
+	protected.Use(auth.Middleware())
 
 	for _, route := range httpServer.AllRoutes {
 		if route.Protected {
