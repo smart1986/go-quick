@@ -18,4 +18,5 @@ func TestLogger(t *testing.T) {
 	timeHandler := &TimeOffsetHandler{timeOffset: 60 * 60 * 10}
 	logger.NewLoggerOfTimeOffset(config.GlobalConfig, timeHandler)
 	logger.Info("Starting server")
+	logger.ErrorWithStack("test")
 }
