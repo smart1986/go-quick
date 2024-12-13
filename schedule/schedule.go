@@ -76,7 +76,6 @@ func doTask(task *Task, now int64) {
 		}()
 		task.StartTime = now
 		task.TaskFunc()
-		logger.Debug("task:", task.TaskName, " invoke success")
 	}()
 }
 
