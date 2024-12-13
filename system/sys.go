@@ -11,6 +11,10 @@ type (
 	IExit interface {
 		OnSystemExit()
 	}
+	ITime interface {
+		GetNowSecond() int64
+		GetNowMillisecond() int64
+	}
 )
 
 var exitHandlers []IExit
