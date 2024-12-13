@@ -4,6 +4,7 @@ import (
 	"github.com/smart1986/go-quick/config"
 	"github.com/smart1986/go-quick/logger"
 	"testing"
+	"time"
 )
 
 type TimeOffsetHandler struct {
@@ -15,8 +16,7 @@ func (t *TimeOffsetHandler) GetTimeOffset() int64 {
 }
 func TestLogger(t *testing.T) {
 	config.InitConfig()
-	timeHandler := &TimeOffsetHandler{timeOffset: 60 * 60 * 10}
+	timeHandler := &TimeOffsetHandler{timeOffset: int64(time.Now().Unix() + 10000)}
 	logger.NewLoggerOfTimeOffset(config.GlobalConfig, timeHandler)
 	logger.Info("Starting server")
-	logger.ErrorWithStack("test")
 }

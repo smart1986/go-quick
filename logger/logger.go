@@ -12,6 +12,7 @@ import (
 )
 
 var Logger *zap.SugaredLogger
+var offsetTimeHandler ITimeOffset
 
 type ITimeOffset interface {
 	GetTimeOffset() int64
@@ -22,19 +23,19 @@ func NewLogger(c *config.Config) {
 }
 func NewLoggerOfTimeOffset(c *config.Config, timeOffsetHandler ITimeOffset) {
 	// Lumberjack configuration for file logging
-	timeOffset := int64(0)
-	if timeOffsetHandler != nil {
-		timeOffset = timeOffsetHandler.GetTimeOffset()
-	}
+	offsetTimeHandler = timeOffsetHandler
 	encoderConfig := zap.NewProductionEncoderConfig()
 	encoderConfig.TimeKey = "timestamp"
 	encoderConfig.EncodeTime = func(t time.Time, enc zapcore.PrimitiveArrayEncoder) {
 		enc.AppendString(t.Format("2006-01-02 15:04:05.000"))
-		if timeOffset > 0 {
-			offsetTime := t.Add(time.Duration(timeOffset) * time.Second)
-			enc.AppendString("[" + offsetTime.Format("2006-01-02 15:04:05.000") + "]")
+	}
+	if offsetTimeHandler != nil {
+		encoderConfig.EncodeName = func(name string, enc zapcore.PrimitiveArrayEncoder) {
+			str := time.Unix(offsetTimeHandler.GetTimeOffset(), 0).Format("2006-01-02 15:04:05")
+			enc.AppendString("[" + str + "] ")
 		}
 	}
+
 	encoderConfig.CallerKey = "caller"
 
 	zapLevel := zap.InfoLevel
@@ -133,21 +134,41 @@ func NewLoggerOfTimeOffset(c *config.Config, timeOffsetHandler ITimeOffset) {
 }
 
 func Debug(args ...interface{}) {
+	if offsetTimeHandler != nil && offsetTimeHandler.GetTimeOffset() != 0 {
+		var timeStr = "[" + time.Unix(offsetTimeHandler.GetTimeOffset(), 0).Format("2006-01-02 15:04:05") + "]"
+		args = append([]interface{}{timeStr}, args...)
+	}
 	Logger.Desugar().WithOptions(zap.AddCallerSkip(1)).Sugar().Debug(args...)
 }
 
 func Info(args ...interface{}) {
+	if offsetTimeHandler != nil && offsetTimeHandler.GetTimeOffset() != 0 {
+		var timeStr = "[" + time.Unix(offsetTimeHandler.GetTimeOffset(), 0).Format("2006-01-02 15:04:05") + "]"
+		args = append([]interface{}{timeStr}, args...)
+	}
 	Logger.Desugar().WithOptions(zap.AddCallerSkip(1)).Sugar().Info(args...)
 }
 
 func Warn(args ...interface{}) {
+	if offsetTimeHandler != nil && offsetTimeHandler.GetTimeOffset() != 0 {
+		var timeStr = "[" + time.Unix(offsetTimeHandler.GetTimeOffset(), 0).Format("2006-01-02 15:04:05") + "]"
+		args = append([]interface{}{timeStr}, args...)
+	}
 	Logger.Desugar().WithOptions(zap.AddCallerSkip(1)).Sugar().Warn(args...)
 }
 
 func Error(args ...interface{}) {
+	if offsetTimeHandler != nil && offsetTimeHandler.GetTimeOffset() != 0 {
+		var timeStr = "[" + time.Unix(offsetTimeHandler.GetTimeOffset(), 0).Format("2006-01-02 15:04:05") + "]"
+		args = append([]interface{}{timeStr}, args...)
+	}
 	Logger.Desugar().WithOptions(zap.AddCallerSkip(1)).Sugar().Error(args...)
 }
 func ErrorWithStack(args ...interface{}) {
+	if offsetTimeHandler != nil && offsetTimeHandler.GetTimeOffset() != 0 {
+		var timeStr = "[" + time.Unix(offsetTimeHandler.GetTimeOffset(), 0).Format("2006-01-02 15:04:05") + "]"
+		args = append([]interface{}{timeStr}, args...)
+	}
 	args = append(args, zap.Stack("stack"))
 	Logger.Desugar().WithOptions(zap.AddCallerSkip(1)).Sugar().Error(args...)
 }
