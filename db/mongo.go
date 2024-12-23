@@ -28,13 +28,21 @@ func (m *MongoDB) InitDb(c *config.Config) {
 	if c.Mongo.MaxPoolSize > 0 {
 		poolSize = c.Mongo.MaxPoolSize
 	}
-	clientOptions := options.Client().SetMaxPoolSize(poolSize).
-		ApplyURI(c.Mongo.Uri). // 不带用户名和密码的 URI
-		SetAuth(options.Credential{
-			Username:   c.Mongo.Username, // 设置用户名
-			Password:   c.Mongo.Password, // 设置密码
-			AuthSource: "admin",          // 指定认证数据库 (通常为 "admin")
-		})
+	if c.Mongo.Uri == "" {
+		panic("MongoDB URI is required")
+	}
+	var clientOptions *options.ClientOptions
+	if c.Mongo.Username != "" && c.Mongo.Password != "" {
+		clientOptions = options.Client().SetMaxPoolSize(poolSize).
+			ApplyURI(c.Mongo.Uri). // 不带用户名和密码的 URI
+			SetAuth(options.Credential{
+				Username:   c.Mongo.Username, // 设置用户名
+				Password:   c.Mongo.Password, // 设置密码
+				AuthSource: "admin",          // 指定认证数据库 (通常为 "admin")
+			})
+	} else {
+		clientOptions = options.Client().SetMaxPoolSize(poolSize).ApplyURI(c.Mongo.Uri)
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
