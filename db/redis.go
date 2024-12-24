@@ -39,4 +39,5 @@ func InitRedis(c *config.Config) {
 
 func (r *Redis) OnSystemExit() {
 	_ = r.Client.Close()
+	logger.Info("Disconnected from Redis")
 }
