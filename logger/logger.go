@@ -5,7 +5,6 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"gopkg.in/natefinch/lumberjack.v2"
-	"log"
 	"os"
 	"strings"
 	"time"
@@ -21,41 +20,30 @@ type ITimeOffset interface {
 func NewLogger(c *config.Config) {
 	NewLoggerOfTimeOffset(c, nil)
 }
+
 func NewLoggerOfTimeOffset(c *config.Config, timeOffsetHandler ITimeOffset) {
-	// Lumberjack configuration for file logging
 	offsetTimeHandler = timeOffsetHandler
 	encoderConfig := zap.NewProductionEncoderConfig()
 	encoderConfig.TimeKey = "timestamp"
 	encoderConfig.EncodeTime = func(t time.Time, enc zapcore.PrimitiveArrayEncoder) {
+		if offsetTimeHandler != nil && offsetTimeHandler.GetTimeOffset() != 0 {
+			t = time.Unix(offsetTimeHandler.GetTimeOffset(), 0)
+		}
 		enc.AppendString(t.Format("2006-01-02 15:04:05.000"))
 	}
-	if offsetTimeHandler != nil {
-		encoderConfig.EncodeName = func(name string, enc zapcore.PrimitiveArrayEncoder) {
-			str := time.Unix(offsetTimeHandler.GetTimeOffset(), 0).Format("2006-01-02 15:04:05")
-			enc.AppendString("[" + str + "] ")
-		}
-	}
-
-	encoderConfig.CallerKey = "caller"
 
 	zapLevel := zap.InfoLevel
-	level := c.Log.Level
-	level = strings.ToLower(level)
-	if level != "" {
-		if "debug" == level {
-			zapLevel = zap.DebugLevel
-		}
-		if "info" == level {
-			zapLevel = zap.InfoLevel
-		}
-		if "warn" == level {
-			zapLevel = zap.WarnLevel
-		}
-		if "error" == level {
-			zapLevel = zap.ErrorLevel
-		}
+	level := strings.ToLower(c.Log.Level)
+	switch level {
+	case "debug":
+		zapLevel = zap.DebugLevel
+	case "info":
+		zapLevel = zap.InfoLevel
+	case "warn":
+		zapLevel = zap.WarnLevel
+	case "error":
+		zapLevel = zap.ErrorLevel
 	}
-	errSync := os.Stdout.Sync()
 
 	var fileCore zapcore.Core
 	if c.Log.FileEnable {
@@ -63,24 +51,11 @@ func NewLoggerOfTimeOffset(c *config.Config, timeOffsetHandler ITimeOffset) {
 		if filename == "" {
 			filename = "logs/app.log"
 		}
-		maxSize := c.Log.MaxSize
-		if maxSize == 0 {
-			maxSize = 10
-		}
-		maxBackups := c.Log.MaxBack
-		if maxBackups == 0 {
-			maxBackups = 3
-		}
-		maxAge := c.Log.MaxAge
-		if maxAge == 0 {
-			maxAge = 28
-		}
-
 		fileSync := zapcore.AddSync(&lumberjack.Logger{
 			Filename:   filename,
-			MaxSize:    maxSize, // megabytes
-			MaxBackups: maxBackups,
-			MaxAge:     maxAge, // days
+			MaxSize:    c.Log.MaxSize,
+			MaxBackups: c.Log.MaxBack,
+			MaxAge:     c.Log.MaxAge,
 		})
 		fileCore = zapcore.NewCore(
 			zapcore.NewJSONEncoder(encoderConfig),
@@ -88,107 +63,67 @@ func NewLoggerOfTimeOffset(c *config.Config, timeOffsetHandler ITimeOffset) {
 			zapLevel,
 		)
 	}
-	var consoleCore zapcore.Core
-	if errSync == nil {
-		consoleSync := zapcore.AddSync(os.Stdout)
 
+	var consoleCore zapcore.Core
+	if c.Log.ConsoleEnable {
 		consoleCore = zapcore.NewCore(
 			zapcore.NewConsoleEncoder(encoderConfig),
-			consoleSync,
+			zapcore.AddSync(os.Stdout),
 			zapLevel,
 		)
 	}
 
-	// Combine cores
 	var core zapcore.Core
-	if errSync == nil {
-		if c.Log.FileEnable {
-			core = zapcore.NewTee(fileCore, consoleCore)
-		} else {
-			core = consoleCore
-		}
-	}
-	if c.Log.FileEnable && errSync == nil {
+	if c.Log.ConsoleEnable && c.Log.FileEnable {
 		core = zapcore.NewTee(fileCore, consoleCore)
+	} else if c.Log.ConsoleEnable {
+		core = consoleCore
 	} else {
-		if errSync != nil {
-			core = fileCore
-		} else {
-			core = consoleCore
-		}
-
+		core = fileCore
 	}
 	if core == nil {
-		log.Fatalf("no core")
+		core = zapcore.NewCore(
+			zapcore.NewConsoleEncoder(encoderConfig),
+			zapcore.AddSync(os.Stdout),
+			zapLevel,
+		)
 	}
-	zlog := zap.New(core, zap.AddCaller())
 
-	defer func(zlog *zap.Logger) {
-		err := zlog.Sync()
-		if err != nil {
-			log.Fatalf("zap logger sync error: %v", err)
+	zlog := zap.New(core, zap.AddCaller())
+	defer func() {
+		if err := zlog.Sync(); err != nil {
+			Logger.Warnf("zap logger sync error: %v", err)
 		}
-	}(zlog)
+	}()
 
 	Logger = zlog.Sugar()
 }
 
-func Debug(args ...interface{}) {
+func logWithOffset(level zapcore.Level, args ...interface{}) {
 	if offsetTimeHandler != nil && offsetTimeHandler.GetTimeOffset() != 0 {
-		var timeStr = "[" + time.Unix(offsetTimeHandler.GetTimeOffset(), 0).Format("2006-01-02 15:04:05") + "]"
+		timeStr := "[" + time.Unix(offsetTimeHandler.GetTimeOffset(), 0).Format("2006-01-02 15:04:05") + "]"
 		args = append([]interface{}{timeStr}, args...)
 	}
-	Logger.Desugar().WithOptions(zap.AddCallerSkip(1)).Sugar().Debug(args...)
+	Logger.Desugar().WithOptions(zap.AddCallerSkip(1)).Sugar().Log(level, args...)
+}
+
+func Debug(args ...interface{}) {
+	logWithOffset(zap.DebugLevel, args...)
 }
 
 func Info(args ...interface{}) {
-	if offsetTimeHandler != nil && offsetTimeHandler.GetTimeOffset() != 0 {
-		var timeStr = "[" + time.Unix(offsetTimeHandler.GetTimeOffset(), 0).Format("2006-01-02 15:04:05") + "]"
-		args = append([]interface{}{timeStr}, args...)
-	}
-	Logger.Desugar().WithOptions(zap.AddCallerSkip(1)).Sugar().Info(args...)
+	logWithOffset(zap.InfoLevel, args...)
 }
 
 func Warn(args ...interface{}) {
-	if offsetTimeHandler != nil && offsetTimeHandler.GetTimeOffset() != 0 {
-		var timeStr = "[" + time.Unix(offsetTimeHandler.GetTimeOffset(), 0).Format("2006-01-02 15:04:05") + "]"
-		args = append([]interface{}{timeStr}, args...)
-	}
-	Logger.Desugar().WithOptions(zap.AddCallerSkip(1)).Sugar().Warn(args...)
+	logWithOffset(zap.WarnLevel, args...)
 }
 
 func Error(args ...interface{}) {
-	if offsetTimeHandler != nil && offsetTimeHandler.GetTimeOffset() != 0 {
-		var timeStr = "[" + time.Unix(offsetTimeHandler.GetTimeOffset(), 0).Format("2006-01-02 15:04:05") + "]"
-		args = append([]interface{}{timeStr}, args...)
-	}
-	Logger.Desugar().WithOptions(zap.AddCallerSkip(1)).Sugar().Error(args...)
+	logWithOffset(zap.ErrorLevel, args...)
 }
+
 func ErrorWithStack(args ...interface{}) {
-	if offsetTimeHandler != nil && offsetTimeHandler.GetTimeOffset() != 0 {
-		var timeStr = "[" + time.Unix(offsetTimeHandler.GetTimeOffset(), 0).Format("2006-01-02 15:04:05") + "]"
-		args = append([]interface{}{timeStr}, args...)
-	}
 	args = append(args, zap.Stack("stack"))
-	Logger.Desugar().WithOptions(zap.AddCallerSkip(1)).Sugar().Error(args...)
-}
-
-func Debugf(template string, args ...interface{}) {
-	Logger.Desugar().WithOptions(zap.AddCallerSkip(1)).Sugar().Debugf(template, args...)
-}
-
-func Infof(template string, args ...interface{}) {
-	Logger.Desugar().WithOptions(zap.AddCallerSkip(1)).Sugar().Infof(template, args...)
-}
-
-func Warnf(template string, args ...interface{}) {
-	Logger.Desugar().WithOptions(zap.AddCallerSkip(1)).Sugar().Warnf(template, args...)
-}
-
-func Errorf(template string, args ...interface{}) {
-	Logger.Desugar().WithOptions(zap.AddCallerSkip(1)).Sugar().Errorf(template, args...)
-}
-func ErrorfWithStack(template string, args ...interface{}) {
-	args = append(args, zap.Stack("stack"))
-	Logger.Desugar().WithOptions(zap.AddCallerSkip(1)).Sugar().Errorw("error", "template", template, "args", args)
+	logWithOffset(zap.ErrorLevel, args...)
 }

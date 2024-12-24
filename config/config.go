@@ -14,12 +14,13 @@ type Config struct {
 		AdminAddr string `yaml:"adminAddr"`
 	} `yml:"server"`
 	Log struct {
-		Level      string `yaml:"level"`
-		File       string `yaml:"file"`
-		FileEnable bool   `yaml:"fileEnable"`
-		MaxSize    int    `yaml:"maxSize"`
-		MaxAge     int    `yaml:"maxAge"`
-		MaxBack    int    `yaml:"maxBack"`
+		Level         string `yaml:"level"`
+		File          string `yaml:"file"`
+		FileEnable    bool   `yaml:"fileEnable"`
+		ConsoleEnable bool   `yaml:"consoleEnable"`
+		MaxSize       int    `yaml:"maxSize"`
+		MaxAge        int    `yaml:"maxAge"`
+		MaxBack       int    `yaml:"maxBack"`
 	} `yml:"log"`
 	Mongo struct {
 		Uri         string `yaml:"uri"`
