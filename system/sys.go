@@ -1,6 +1,7 @@
 package system
 
 import (
+	"github.com/smart1986/go-quick/logger"
 	"os"
 	"os/signal"
 	"reflect"
@@ -38,6 +39,7 @@ func WaitElegantExit(exitFunc ...func()) {
 					handler.OnSystemExit()
 				}
 			}
+			logger.Info("system exit gracefully")
 			os.Exit(0)
 		}
 	}
