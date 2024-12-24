@@ -106,6 +106,13 @@ func logWithOffset(level zapcore.Level, args ...interface{}) {
 	}
 	Logger.Desugar().WithOptions(zap.AddCallerSkip(1)).Sugar().Log(level, args...)
 }
+func logWithOffsetFormat(template string, level zapcore.Level, args ...interface{}) {
+	if offsetTimeHandler != nil && offsetTimeHandler.GetTimeOffset() != 0 {
+		timeStr := "[" + time.Unix(offsetTimeHandler.GetTimeOffset(), 0).Format("2006-01-02 15:04:05") + "]"
+		args = append([]interface{}{timeStr}, args...)
+	}
+	Logger.Desugar().WithOptions(zap.AddCallerSkip(1)).Sugar().Logf(level, template, args...)
+}
 
 func Debug(args ...interface{}) {
 	logWithOffset(zap.DebugLevel, args...)
@@ -126,4 +133,25 @@ func Error(args ...interface{}) {
 func ErrorWithStack(args ...interface{}) {
 	args = append(args, zap.Stack("stack"))
 	logWithOffset(zap.ErrorLevel, args...)
+}
+
+func Debugf(template string, args ...interface{}) {
+	logWithOffsetFormat(template, zap.DebugLevel, args...)
+}
+
+func Infof(template string, args ...interface{}) {
+	logWithOffsetFormat(template, zap.InfoLevel, args...)
+}
+
+func Warnf(template string, args ...interface{}) {
+	logWithOffsetFormat(template, zap.WarnLevel, args...)
+}
+
+func Errorf(template string, args ...interface{}) {
+	logWithOffsetFormat(template, zap.ErrorLevel, args...)
+}
+
+func ErrorfWithStack(template string, args ...interface{}) {
+	args = append(args, zap.Stack("stack"))
+	logWithOffsetFormat(template, zap.ErrorLevel, args...)
 }
