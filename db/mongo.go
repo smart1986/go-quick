@@ -77,6 +77,10 @@ func (m *MongoDB) Get(connectionName string) *mongo.Collection {
 	return m.MongoClient.Database(config.GlobalConfig.Mongo.Database).Collection(connectionName)
 }
 
+func (m *MongoDB) DropCollection(connectionName string) error {
+	return m.Get(connectionName).Drop(context.Background())
+}
+
 func GetNextSequence(sequenceName string, initNum int64) (int64, error) {
 	session, err := MongoInstance.MongoClient.StartSession()
 	if err != nil {
