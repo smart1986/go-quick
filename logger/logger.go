@@ -26,9 +26,6 @@ func NewLoggerOfTimeOffset(c *config.Config, timeOffsetHandler ITimeOffset) {
 	encoderConfig := zap.NewProductionEncoderConfig()
 	encoderConfig.TimeKey = "timestamp"
 	encoderConfig.EncodeTime = func(t time.Time, enc zapcore.PrimitiveArrayEncoder) {
-		if offsetTimeHandler != nil && offsetTimeHandler.GetTimeOffset() != 0 {
-			t = time.Unix(offsetTimeHandler.GetTimeOffset(), 0)
-		}
 		enc.AppendString(t.Format("2006-01-02 15:04:05.000"))
 	}
 
