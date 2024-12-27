@@ -12,6 +12,7 @@ import (
 
 var Logger *zap.SugaredLogger
 var offsetTimeHandler ITimeOffset
+var CurrentLogLevel = zap.InfoLevel
 
 type ITimeOffset interface {
 	GetTimeOffset() int64
@@ -41,7 +42,7 @@ func NewLoggerOfTimeOffset(c *config.Config, timeOffsetHandler ITimeOffset) {
 	case "error":
 		zapLevel = zap.ErrorLevel
 	}
-
+	CurrentLogLevel = zapLevel
 	var fileCore zapcore.Core
 	if c.Log.FileEnable {
 		filename := c.Log.File
