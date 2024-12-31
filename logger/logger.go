@@ -16,6 +16,7 @@ var CurrentLogLevel = zap.InfoLevel
 
 type ITimeOffset interface {
 	GetTimeOffset() int64
+	GetNowSecond() int64
 }
 
 func NewLogger(c *config.Config) {
@@ -99,14 +100,14 @@ func NewLoggerOfTimeOffset(c *config.Config, timeOffsetHandler ITimeOffset) {
 
 func logWithOffset(level zapcore.Level, args ...interface{}) {
 	if offsetTimeHandler != nil && offsetTimeHandler.GetTimeOffset() != 0 {
-		timeStr := "[" + time.Unix(offsetTimeHandler.GetTimeOffset(), 0).Format("2006-01-02 15:04:05") + "]"
+		timeStr := "[" + time.Unix(offsetTimeHandler.GetNowSecond(), 0).Format("2006-01-02 15:04:05") + "] "
 		args = append([]interface{}{timeStr}, args...)
 	}
 	Logger.Desugar().WithOptions(zap.AddCallerSkip(2)).Sugar().Log(level, args...)
 }
 func logWithOffsetFormat(template string, level zapcore.Level, args ...interface{}) {
 	if offsetTimeHandler != nil && offsetTimeHandler.GetTimeOffset() != 0 {
-		timeStr := "[" + time.Unix(offsetTimeHandler.GetTimeOffset(), 0).Format("2006-01-02 15:04:05") + "]"
+		timeStr := "[" + time.Unix(offsetTimeHandler.GetNowSecond(), 0).Format("2006-01-02 15:04:05") + "] "
 		args = append([]interface{}{timeStr}, args...)
 	}
 	Logger.Desugar().WithOptions(zap.AddCallerSkip(2)).Sugar().Logf(level, template, args...)
