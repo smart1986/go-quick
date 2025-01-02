@@ -9,7 +9,7 @@ import (
 )
 
 func TestEtcd(t *testing.T) {
-	config.InitConfig()
+	config.InitConfig("./config.yml", &config.Config{})
 	cli, err := clientv3.New(clientv3.Config{
 		Endpoints:   config.GlobalConfig.Etcd.Endpoints,
 		DialTimeout: time.Duration(config.GlobalConfig.Etcd.DialTimeout) * time.Second,

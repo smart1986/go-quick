@@ -10,7 +10,7 @@ import (
 )
 
 func TestServer(tt *testing.T) {
-	config.InitConfig()
+	config.InitConfig("./config.yml", &config.Config{})
 	logger.NewLogger(config.GlobalConfig)
 	//go func() {
 	third.InitEtcd("/test/", "192.168.0.106", "", nil)

@@ -9,7 +9,7 @@ import (
 )
 
 func TestEtcdWatch(t *testing.T) {
-	config.InitConfig()
+	config.InitConfig("./config.yml", &config.Config{})
 	logger.NewLogger(config.GlobalConfig)
 	//go func() {
 	third.InitEtcd("/test/", "127.0.0.1", "", nil)

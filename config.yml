@@ -1,0 +1,20 @@
+server:
+  addr: '0.0.0.0:8080'
+  adminAddr: ':8081'
+log:
+    level: 'debug'
+    fileEnable : false
+    consoleEnable: true
+
+mongo:
+  uri: 'mongodb://root:uins123456@127.0.0.1:27017,127.0.0.1:27018,127.0.0.1:27019/?replicaSet=umongodb-rs-163nej3tmw18'
+#  database: 'test'
+#  username: 'test'
+#  password: 'test'
+  maxPoolSize: 10
+redis:
+  addr: 127.0.0.1:6379
+etcd:
+  endpoints:
+    - 127.0.0.1:2379
+  timeout: 2

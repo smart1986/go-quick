@@ -21,7 +21,7 @@ func (mt *MyTimeOffsetHandler) GetNowMillisecond() int64 {
 }
 
 func TestSchedule(t *testing.T) {
-	config.InitConfig()
+	config.InitConfig("./config.yml", &config.Config{})
 	logger.NewLogger(config.GlobalConfig)
 	timeHandler := &MyTimeOffsetHandler{}
 	schedule.InitSchedule(timeHandler)

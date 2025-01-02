@@ -12,7 +12,7 @@ import (
 )
 
 func TestGate(t *testing.T) {
-	config.InitConfig("gate.yml")
+	config.InitConfig("./gate.yml", &config.Config{})
 	logger.NewLogger(config.GlobalConfig)
 	addr := config.GlobalConfig.Server.Addr
 	s := strings.Split(addr, ":")

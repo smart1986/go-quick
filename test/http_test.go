@@ -8,7 +8,7 @@ import (
 )
 
 func TestHttp(t *testing.T) {
-	config.InitConfig()
+	config.InitConfig("./config.yml", &config.Config{})
 	logger.NewLogger(config.GlobalConfig)
 
 	server := &quickhttp.HttpServer{}

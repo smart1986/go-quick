@@ -42,19 +42,25 @@ type Config struct {
 	} `yml:"etcd"`
 }
 
-func InitConfig(fullName ...string) {
-	c := &Config{}
-	configName := "config.yml"
-	if len(fullName) > 0 {
-		configName = fullName[0]
-	}
-	file, err := os.ReadFile(configName)
+func InitConfig(fullName string, config *Config) {
+	file, err := os.ReadFile(fullName)
 	if err != nil {
 		log.Fatalf("read config file error: %v", err)
 	}
-	err = yaml.Unmarshal(file, c)
+	err = yaml.Unmarshal(file, config)
 	if err != nil {
 		log.Fatalf("unmarshal config file error: %v", err)
 	}
-	GlobalConfig = c
+	GlobalConfig = config
+
+}
+func InitConfigCustomize(fullName string, config interface{}) {
+	file, err := os.ReadFile(fullName)
+	if err != nil {
+		log.Fatalf("read config file error: %v", err)
+	}
+	err = yaml.Unmarshal(file, config)
+	if err != nil {
+		log.Fatalf("unmarshal config file error: %v", err)
+	}
 }
