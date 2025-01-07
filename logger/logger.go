@@ -20,10 +20,10 @@ type ITimeOffset interface {
 }
 
 func NewLogger(c *config.Config) {
-	NewLoggerOfTimeOffset(c, nil)
+	NewLoggerOfTimeOffset(c, nil, false)
 }
 
-func NewLoggerOfTimeOffset(c *config.Config, timeOffsetHandler ITimeOffset) {
+func NewLoggerOfTimeOffset(c *config.Config, timeOffsetHandler ITimeOffset, fileFormatJson bool) {
 	offsetTimeHandler = timeOffsetHandler
 	encoderConfig := zap.NewProductionEncoderConfig()
 	encoderConfig.TimeKey = "timestamp"
@@ -56,8 +56,15 @@ func NewLoggerOfTimeOffset(c *config.Config, timeOffsetHandler ITimeOffset) {
 			MaxBackups: c.Log.MaxBack,
 			MaxAge:     c.Log.MaxAge,
 		})
+		var encoder zapcore.Encoder
+		if fileFormatJson {
+			encoder = zapcore.NewConsoleEncoder(encoderConfig)
+		} else {
+			encoder = zapcore.NewConsoleEncoder(encoderConfig)
+		}
+
 		fileCore = zapcore.NewCore(
-			zapcore.NewJSONEncoder(encoderConfig),
+			encoder,
 			fileSync,
 			zapLevel,
 		)
