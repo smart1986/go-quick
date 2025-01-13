@@ -68,7 +68,7 @@ func logRequestParams() gin.HandlerFunc {
 		start := time.Now()
 
 		// 打印请求信息
-		if logger.CurrentLogLevel == zap.DebugLevel {
+		if logger.DefaultLogger.LogLevel == zap.DebugLevel {
 			reqBody, _ := c.GetRawData()
 			logger.Debugf("Request: %s %s %s\n", c.Request.Method, c.Request.RequestURI, string(reqBody))
 			c.Request.Body = io.NopCloser(bytes.NewBuffer(reqBody))

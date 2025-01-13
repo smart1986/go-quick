@@ -5,7 +5,6 @@ import (
 	"github.com/smart1986/go-quick/config"
 	"github.com/smart1986/go-quick/logger"
 	"github.com/smart1986/go-quick/system"
-	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"log"
@@ -20,6 +19,11 @@ type (
 		MongoClient *mongo.Client
 	}
 )
+
+func InitDefaultDB(c *config.Config) {
+	MongoInstance = &MongoDB{}
+	MongoInstance.InitDb(c)
+}
 
 func (m *MongoDB) InitDb(c *config.Config) {
 	m.component = &Component{}
@@ -58,7 +62,6 @@ func (m *MongoDB) InitDb(c *config.Config) {
 	}
 
 	m.MongoClient = client
-	MongoInstance = m
 	system.RegisterExitHandler(m)
 	logger.Infof("Connected to MongoDB Successfully, URI: %s", c.Mongo.Uri)
 }
@@ -79,48 +82,4 @@ func (m *MongoDB) Get(connectionName string) *mongo.Collection {
 
 func (m *MongoDB) DropCollection(connectionName string) error {
 	return m.Get(connectionName).Drop(context.Background())
-}
-
-func GetNextSequence(sequenceName string, initNum int64) (int64, error) {
-	session, err := MongoInstance.MongoClient.StartSession()
-	if err != nil {
-		logger.Errorf("Failed to start session: %v", err)
-		return 0, err
-	}
-	defer session.EndSession(context.Background())
-
-	result, err := session.WithTransaction(context.Background(), func(sessCtx mongo.SessionContext) (interface{}, error) {
-		collection := MongoInstance.Get("counters")
-		filter := bson.M{"_id": sequenceName}
-		update := bson.M{"$inc": bson.M{"seq": 1}}
-		opts := options.FindOneAndUpdate().SetReturnDocument(options.After).SetUpsert(true)
-
-		var result struct {
-			Seq int64 `bson:"seq"`
-		}
-
-		err := collection.FindOneAndUpdate(sessCtx, filter, update, opts).Decode(&result)
-		if err != nil {
-			logger.Errorf("Failed to get next sequence for %s: %v", sequenceName, err)
-			return nil, err
-		}
-
-		// 如果计数器是新创建的，初始化为 initNum
-		if result.Seq == 1 {
-			_, err = collection.UpdateOne(sessCtx, filter, bson.M{"$set": bson.M{"seq": initNum}})
-			if err != nil {
-				logger.Errorf("Failed to initialize sequence for %s: %v", sequenceName, err)
-				return nil, err
-			}
-			return initNum, nil
-		}
-
-		return result.Seq, nil
-	})
-
-	if err != nil {
-		return 0, err
-	}
-
-	return result.(int64), nil
 }

@@ -1,6 +1,7 @@
 package logger
 
 import (
+	"fmt"
 	"github.com/smart1986/go-quick/config"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -10,21 +11,37 @@ import (
 	"time"
 )
 
-var Logger *zap.SugaredLogger
-var offsetTimeHandler ITimeOffset
-var CurrentLogLevel = zap.InfoLevel
+type (
+	QuickLogger struct {
+		Logger      *zap.SugaredLogger
+		LogLevel    zapcore.Level
+		TimeHandler ITimeOffset
+	}
+	ITimeOffset interface {
+		GetTimeOffset() int64
+		GetNowSecond() int64
+	}
+)
 
-type ITimeOffset interface {
-	GetTimeOffset() int64
-	GetNowSecond() int64
-}
+var DefaultLogger *QuickLogger
 
 func NewLogger(c *config.Config) {
-	NewLoggerOfTimeOffset(c, nil, false)
+	q := &QuickLogger{}
+	q.NewLoggerOfTimeOffset(c, nil, false)
+	DefaultLogger = q
+}
+func NewLoggerOfTimeOffset(c *config.Config, timeOffsetHandler ITimeOffset, fileFormatJson bool) {
+	q := &QuickLogger{}
+	q.NewLoggerOfTimeOffset(c, timeOffsetHandler, fileFormatJson)
+	DefaultLogger = q
 }
 
-func NewLoggerOfTimeOffset(c *config.Config, timeOffsetHandler ITimeOffset, fileFormatJson bool) {
-	offsetTimeHandler = timeOffsetHandler
+func (q *QuickLogger) NewLogger(c *config.Config) {
+	q.NewLoggerOfTimeOffset(c, nil, false)
+}
+
+func (q *QuickLogger) NewLoggerOfTimeOffset(c *config.Config, timeOffsetHandler ITimeOffset, fileFormatJson bool) {
+	q.TimeHandler = timeOffsetHandler
 	encoderConfig := zap.NewProductionEncoderConfig()
 	encoderConfig.TimeKey = "timestamp"
 	encoderConfig.EncodeTime = func(t time.Time, enc zapcore.PrimitiveArrayEncoder) {
@@ -43,7 +60,7 @@ func NewLoggerOfTimeOffset(c *config.Config, timeOffsetHandler ITimeOffset, file
 	case "error":
 		zapLevel = zap.ErrorLevel
 	}
-	CurrentLogLevel = zapLevel
+	q.LogLevel = zapLevel
 	var fileCore zapcore.Core
 	if c.Log.FileEnable {
 		filename := c.Log.File
@@ -98,66 +115,108 @@ func NewLoggerOfTimeOffset(c *config.Config, timeOffsetHandler ITimeOffset, file
 	zlog := zap.New(core, zap.AddCaller())
 	defer func() {
 		if err := zlog.Sync(); err != nil {
-			Logger.Warnf("zap logger sync error: %v", err)
+			fmt.Printf("zap logger sync error: %v", err)
 		}
 	}()
 
-	Logger = zlog.Sugar()
+	q.Logger = zlog.Sugar()
 }
 
-func logWithOffset(level zapcore.Level, args ...interface{}) {
-	if offsetTimeHandler != nil && offsetTimeHandler.GetTimeOffset() != 0 {
-		timeStr := "[" + time.Unix(offsetTimeHandler.GetNowSecond(), 0).Format("2006-01-02 15:04:05") + "] "
+func logWithOffset(q *QuickLogger, level zapcore.Level, args ...interface{}) {
+	if q.TimeHandler != nil && q.TimeHandler.GetTimeOffset() != 0 {
+		timeStr := "[" + time.Unix(q.TimeHandler.GetNowSecond(), 0).Format("2006-01-02 15:04:05") + "] "
 		args = append([]interface{}{timeStr}, args...)
 	}
-	Logger.Desugar().WithOptions(zap.AddCallerSkip(2)).Sugar().Log(level, args...)
+	q.Logger.Desugar().WithOptions(zap.AddCallerSkip(2)).Sugar().Log(level, args...)
 }
-func logWithOffsetFormat(template string, level zapcore.Level, args ...interface{}) {
-	if offsetTimeHandler != nil && offsetTimeHandler.GetTimeOffset() != 0 {
-		timeStr := "[" + time.Unix(offsetTimeHandler.GetNowSecond(), 0).Format("2006-01-02 15:04:05") + "] "
+func logWithOffsetFormat(q *QuickLogger, template string, level zapcore.Level, args ...interface{}) {
+	if q.TimeHandler != nil && q.TimeHandler.GetTimeOffset() != 0 {
+		timeStr := "[" + time.Unix(q.TimeHandler.GetNowSecond(), 0).Format("2006-01-02 15:04:05") + "] "
 		args = append([]interface{}{timeStr}, args...)
 	}
-	Logger.Desugar().WithOptions(zap.AddCallerSkip(2)).Sugar().Logf(level, template, args...)
+	q.Logger.Desugar().WithOptions(zap.AddCallerSkip(2)).Sugar().Logf(level, template, args...)
+}
+
+func (q *QuickLogger) Debug(args ...interface{}) {
+	logWithOffset(q, zap.DebugLevel, args...)
+}
+
+func (q *QuickLogger) Info(args ...interface{}) {
+	logWithOffset(q, zap.InfoLevel, args...)
+}
+
+func (q *QuickLogger) Warn(args ...interface{}) {
+	logWithOffset(q, zap.WarnLevel, args...)
+}
+
+func (q *QuickLogger) Error(args ...interface{}) {
+	logWithOffset(q, zap.ErrorLevel, args...)
+}
+
+func (q *QuickLogger) ErrorWithStack(args ...interface{}) {
+	args = append(args, zap.Stack("stack"))
+	logWithOffset(q, zap.ErrorLevel, args...)
+}
+
+func (q *QuickLogger) Debugf(template string, args ...interface{}) {
+	logWithOffsetFormat(q, template, zap.DebugLevel, args...)
+}
+
+func (q *QuickLogger) Infof(template string, args ...interface{}) {
+	logWithOffsetFormat(q, template, zap.InfoLevel, args...)
+}
+
+func (q *QuickLogger) Warnf(template string, args ...interface{}) {
+	logWithOffsetFormat(q, template, zap.WarnLevel, args...)
+}
+
+func (q *QuickLogger) Errorf(template string, args ...interface{}) {
+	logWithOffsetFormat(q, template, zap.ErrorLevel, args...)
+}
+
+func (q *QuickLogger) ErrorfWithStack(template string, args ...interface{}) {
+	args = append(args, zap.Stack("stack"))
+	logWithOffsetFormat(q, template, zap.ErrorLevel, args...)
 }
 
 func Debug(args ...interface{}) {
-	logWithOffset(zap.DebugLevel, args...)
+	logWithOffset(DefaultLogger, zap.DebugLevel, args...)
 }
 
 func Info(args ...interface{}) {
-	logWithOffset(zap.InfoLevel, args...)
+	logWithOffset(DefaultLogger, zap.InfoLevel, args...)
 }
 
 func Warn(args ...interface{}) {
-	logWithOffset(zap.WarnLevel, args...)
+	logWithOffset(DefaultLogger, zap.WarnLevel, args...)
 }
 
 func Error(args ...interface{}) {
-	logWithOffset(zap.ErrorLevel, args...)
+	logWithOffset(DefaultLogger, zap.ErrorLevel, args...)
 }
 
 func ErrorWithStack(args ...interface{}) {
 	args = append(args, zap.Stack("stack"))
-	logWithOffset(zap.ErrorLevel, args...)
+	logWithOffset(DefaultLogger, zap.ErrorLevel, args...)
 }
 
 func Debugf(template string, args ...interface{}) {
-	logWithOffsetFormat(template, zap.DebugLevel, args...)
+	logWithOffsetFormat(DefaultLogger, template, zap.DebugLevel, args...)
 }
 
 func Infof(template string, args ...interface{}) {
-	logWithOffsetFormat(template, zap.InfoLevel, args...)
+	logWithOffsetFormat(DefaultLogger, template, zap.InfoLevel, args...)
 }
 
 func Warnf(template string, args ...interface{}) {
-	logWithOffsetFormat(template, zap.WarnLevel, args...)
+	logWithOffsetFormat(DefaultLogger, template, zap.WarnLevel, args...)
 }
 
 func Errorf(template string, args ...interface{}) {
-	logWithOffsetFormat(template, zap.ErrorLevel, args...)
+	logWithOffsetFormat(DefaultLogger, template, zap.ErrorLevel, args...)
 }
 
 func ErrorfWithStack(template string, args ...interface{}) {
 	args = append(args, zap.Stack("stack"))
-	logWithOffsetFormat(template, zap.ErrorLevel, args...)
+	logWithOffsetFormat(DefaultLogger, template, zap.ErrorLevel, args...)
 }

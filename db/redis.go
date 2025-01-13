@@ -10,34 +10,38 @@ import (
 
 var RedisInstance *redis.Client
 
-type Redis struct {
+type QRedis struct {
 	Client *redis.Client
 }
 
 func InitRedis(c *config.Config) {
+	quickRedis := &QRedis{}
+	quickRedis.InitRedis(c)
+	RedisInstance = quickRedis.Client
+
+}
+func (r *QRedis) InitRedis(c *config.Config) {
 	ctx := context.Background()
 	poolSize := 8
 	if c.Redis.PoolSize > 0 {
 		poolSize = c.Redis.PoolSize
 	}
-	RedisInstance = redis.NewClient(&redis.Options{
+	client := redis.NewClient(&redis.Options{
 		Addr:     c.Redis.Addr,
 		Password: c.Redis.Password,
 		DB:       c.Redis.Db,
 		PoolSize: poolSize,
 	})
-	_, err := RedisInstance.Ping(ctx).Result()
+	_, err := client.Ping(ctx).Result()
 	if err != nil {
 		panic(err)
 	}
-	r := &Redis{
-		Client: RedisInstance,
-	}
+	r.Client = client
 	system.RegisterExitHandler(r)
-	logger.Infof("Connected to Redis Successfully, Addr: %s", c.Redis.Addr)
+	logger.Infof("Connected to QRedis Successfully, Addr: %s", c.Redis.Addr)
 }
 
-func (r *Redis) OnSystemExit() {
+func (r *QRedis) OnSystemExit() {
 	_ = r.Client.Close()
-	logger.Info("Disconnected from Redis")
+	logger.Info("Disconnected from QRedis")
 }
