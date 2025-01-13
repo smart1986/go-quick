@@ -15,19 +15,24 @@ var MongoInstance *MongoDB
 
 type (
 	MongoDB struct {
-		component   *Component
+		*Component
 		MongoClient *mongo.Client
 	}
 )
 
 func InitDefaultDB(c *config.Config) {
-	MongoInstance = &MongoDB{}
+	MongoInstance = &MongoDB{
+		Component: &Component{
+			Name:     "MongoDB",
+			DataBase: c.Mongo.Database,
+		},
+	}
 	MongoInstance.InitDb(c)
 }
 
 func (m *MongoDB) InitDb(c *config.Config) {
-	m.component = &Component{}
-	m.component.Name = "MongoDB"
+	m.Name = "MongoDB"
+	m.DataBase = c.Mongo.Database
 	var poolSize uint64 = 8
 	if c.Mongo.MaxPoolSize > 0 {
 		poolSize = c.Mongo.MaxPoolSize
@@ -77,7 +82,7 @@ func (m *MongoDB) OnSystemExit() {
 }
 
 func (m *MongoDB) Get(connectionName string) *mongo.Collection {
-	return m.MongoClient.Database(config.GlobalConfig.Mongo.Database).Collection(connectionName)
+	return m.MongoClient.Database(m.DataBase).Collection(connectionName)
 }
 
 func (m *MongoDB) DropCollection(connectionName string) error {
