@@ -105,7 +105,7 @@ func (m *MongoDB) GetNextSequenceValue(sequenceName string) (int64, error) {
 	callback := func(sessCtx mongo.SessionContext) (interface{}, error) {
 		collection := m.MongoClient.Database(m.DataBase).Collection("counters")
 		filter := bson.M{"_id": sequenceName}
-		update := bson.M{"$inc": bson.M{"sequence_value": 1}, "$setOnInsert": bson.M{"sequence_value": m.CounterInitValue}}
+		update := bson.M{"$inc": bson.M{"sequence_value": 1}}
 		opts := options.FindOneAndUpdate().SetReturnDocument(options.After).SetUpsert(true)
 
 		err := collection.FindOneAndUpdate(sessCtx, filter, update, opts).Decode(&result)
@@ -119,5 +119,5 @@ func (m *MongoDB) GetNextSequenceValue(sequenceName string) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	return result.SequenceValue, nil
+	return result.SequenceValue + m.CounterInitValue, nil
 }
