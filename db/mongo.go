@@ -31,7 +31,30 @@ func InitDefaultDB(c *config.Config) {
 	}
 	MongoInstance.InitDb(c)
 }
+func InitDefaultDBWithIndex(c *config.Config, indexes []IIndex) {
+	MongoInstance = &MongoDB{
+		Component: &Component{
+			Name:     "MongoDB",
+			DataBase: c.Mongo.Database,
+		},
+	}
+	MongoInstance.InitDb(c)
 
+	for _, index := range indexes {
+		index.CreateIndividualIndexes()
+	}
+}
+
+func (m *MongoDB) InitDbWithIndex(c *config.Config, indexes []IIndex) {
+	m.InitDb(c)
+	for _, index := range indexes {
+		index.CreateIndividualIndexes()
+	}
+	if len(indexes) > 0 {
+		logger.Info("MongoDB indexes created successfully")
+	}
+
+}
 func (m *MongoDB) InitDb(c *config.Config) {
 	m.Name = "MongoDB"
 	m.DataBase = c.Mongo.Database

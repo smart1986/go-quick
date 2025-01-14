@@ -9,5 +9,10 @@ type (
 	}
 	IDbInit interface {
 		InitDb(c *config.Config)
+		InitDbWithIndex(c *config.Config, indexes []IIndex)
+	}
+
+	IIndex interface {
+		CreateIndividualIndexes()
 	}
 )
