@@ -5,6 +5,7 @@ import (
 	"github.com/smart1986/go-quick/config"
 	"github.com/smart1986/go-quick/logger"
 	"github.com/smart1986/go-quick/system"
+	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"log"
@@ -16,7 +17,8 @@ var MongoInstance *MongoDB
 type (
 	MongoDB struct {
 		*Component
-		MongoClient *mongo.Client
+		MongoClient      *mongo.Client
+		CounterInitValue int64
 	}
 )
 
@@ -87,4 +89,35 @@ func (m *MongoDB) Get(connectionName string) *mongo.Collection {
 
 func (m *MongoDB) DropCollection(connectionName string) error {
 	return m.Get(connectionName).Drop(context.Background())
+}
+
+func (m *MongoDB) GetNextSequenceValue(sequenceName string) (int64, error) {
+	session, err := m.MongoClient.StartSession()
+	if err != nil {
+		return 0, err
+	}
+	defer session.EndSession(context.Background())
+
+	var result struct {
+		SequenceValue int64 `bson:"sequence_value"`
+	}
+
+	callback := func(sessCtx mongo.SessionContext) (interface{}, error) {
+		collection := m.MongoClient.Database(m.DataBase).Collection("counters")
+		filter := bson.M{"_id": sequenceName}
+		update := bson.M{"$inc": bson.M{"sequence_value": 1}, "$setOnInsert": bson.M{"sequence_value": m.CounterInitValue}}
+		opts := options.FindOneAndUpdate().SetReturnDocument(options.After).SetUpsert(true)
+
+		err := collection.FindOneAndUpdate(sessCtx, filter, update, opts).Decode(&result)
+		if err != nil {
+			return nil, err
+		}
+		return result.SequenceValue, nil
+	}
+
+	_, err = session.WithTransaction(context.Background(), callback)
+	if err != nil {
+		return 0, err
+	}
+	return result.SequenceValue, nil
 }
