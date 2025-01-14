@@ -13,6 +13,6 @@ type (
 	}
 
 	IIndex interface {
-		CreateIndividualIndexes()
+		CreateIndividualIndexes(instance *MongoDB)
 	}
 )
