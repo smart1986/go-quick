@@ -41,14 +41,14 @@ func InitDefaultDBWithIndex(c *config.Config, indexes []IIndex) {
 	MongoInstance.InitDb(c)
 
 	for _, index := range indexes {
-		index.CreateIndividualIndexes()
+		index.CreateIndividualIndexes(MongoInstance)
 	}
 }
 
 func (m *MongoDB) InitDbWithIndex(c *config.Config, indexes []IIndex) {
 	m.InitDb(c)
 	for _, index := range indexes {
-		index.CreateIndividualIndexes()
+		index.CreateIndividualIndexes(m)
 	}
 	if len(indexes) > 0 {
 		logger.Info("MongoDB indexes created successfully")
