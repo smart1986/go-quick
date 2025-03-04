@@ -11,7 +11,9 @@ import (
 var RedisInstance *redis.Client
 
 type QRedis struct {
-	Client *redis.Client
+	Client        *redis.Client
+	RedisSubjects map[string]func(data string)
+	subscribe     *redis.PubSub
 }
 
 func InitRedis(c *config.Config) {
@@ -41,7 +43,36 @@ func (r *QRedis) InitRedis(c *config.Config) {
 	logger.Infof("Connected to QRedis Successfully, Addr: %s", c.Redis.Addr)
 }
 
+func (r *QRedis) RegisterSubject(key string, handler func(data string)) {
+	if r.RedisSubjects == nil {
+		r.RedisSubjects = make(map[string]func(data string))
+	}
+	r.RedisSubjects[key] = handler
+
+}
+func (r *QRedis) Publish(key string, value interface{}) (int64, error) {
+	return r.Client.Publish(context.Background(), key, value).Result()
+}
+func (r *QRedis) StartSubjectListen() {
+	keys := make([]string, 0, len(r.RedisSubjects))
+	for s, _ := range r.RedisSubjects {
+		keys = append(keys, s)
+	}
+	subscribe := r.Client.Subscribe(context.Background(), keys...)
+	go func() {
+		for msg := range subscribe.Channel() {
+			if f, ok := r.RedisSubjects[msg.Channel]; ok {
+				go f(msg.Payload)
+			}
+		}
+	}()
+	r.subscribe = subscribe
+}
+
 func (r *QRedis) OnSystemExit() {
+	if r.subscribe != nil {
+		_ = r.subscribe.Close()
+	}
 	_ = r.Client.Close()
 	logger.Info("Disconnected from QRedis")
 }
