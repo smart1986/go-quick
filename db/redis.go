@@ -8,7 +8,7 @@ import (
 	"github.com/smart1986/go-quick/system"
 )
 
-var RedisInstance *redis.Client
+var RedisInstance *QRedis
 
 type QRedis struct {
 	Client        *redis.Client
@@ -19,7 +19,7 @@ type QRedis struct {
 func InitRedis(c *config.Config) {
 	quickRedis := &QRedis{}
 	quickRedis.InitRedis(c)
-	RedisInstance = quickRedis.Client
+	RedisInstance = quickRedis
 
 }
 func (r *QRedis) InitRedis(c *config.Config) {
