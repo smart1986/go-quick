@@ -33,7 +33,10 @@ func (httpServer *HttpServer) Init(addr string, auth IMiddleware, block bool, mi
 	for _, m := range middleware {
 		middlewareList = append(middlewareList, m.Middleware())
 	}
-	middlewareList = append(middlewareList, logRequestParams())
+	// 打印请求信息
+	if logger.DefaultLogger.LogLevel == zap.DebugLevel {
+		middlewareList = append(middlewareList, logRequestParams())
+	}
 	httpServer.Energy.Use(middlewareList...)
 	protected := httpServer.Energy.Group("/")
 	protected.Use(auth.Middleware())
@@ -67,12 +70,9 @@ func logRequestParams() gin.HandlerFunc {
 		// 记录请求时间
 		start := time.Now()
 
-		// 打印请求信息
-		if logger.DefaultLogger.LogLevel == zap.DebugLevel {
-			reqBody, _ := c.GetRawData()
-			logger.Debugf("Request: %s %s %s\n", c.Request.Method, c.Request.RequestURI, string(reqBody))
-			c.Request.Body = io.NopCloser(bytes.NewBuffer(reqBody))
-		}
+		reqBody, _ := c.GetRawData()
+		logger.Debugf("Request: %s %s %s\n", c.Request.Method, c.Request.RequestURI, string(reqBody))
+		c.Request.Body = io.NopCloser(bytes.NewBuffer(reqBody))
 		// 执行请求处理程序和其他中间件函数
 		c.Next()
 
