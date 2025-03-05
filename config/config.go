@@ -4,6 +4,7 @@ import (
 	"gopkg.in/yaml.v3"
 	"log"
 	"os"
+	"time"
 )
 
 var GlobalConfig *Config
@@ -40,6 +41,8 @@ type Config struct {
 		Endpoints   []string `yaml:"endpoints"`
 		DialTimeout int      `yaml:"timeout"`
 	} `yml:"etcd"`
+
+	LastModifyTime time.Time
 }
 
 func InitConfig(fullName string, config *Config) {
@@ -53,6 +56,11 @@ func InitConfig(fullName string, config *Config) {
 	}
 	GlobalConfig = config
 
+	fileInfo, err := os.Stat(fullName)
+	if err != nil {
+		log.Fatalf("stat config file error: %v", err)
+	}
+	config.LastModifyTime = fileInfo.ModTime()
 }
 func InitConfigCustomize(fullName string, config interface{}) {
 	file, err := os.ReadFile(fullName)
