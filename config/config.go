@@ -72,3 +72,16 @@ func InitConfigCustomize(fullName string, config interface{}) {
 		log.Fatalf("unmarshal config file error: %v", err)
 	}
 }
+func InitConfigWithString(content string, config *Config) {
+	err := yaml.Unmarshal([]byte(content), config)
+	if err != nil {
+		log.Fatalf("unmarshal config file error: %v", err)
+	}
+	GlobalConfig = config
+}
+func InitConfigCustomizeWithString(content string, config interface{}) {
+	err := yaml.Unmarshal([]byte(content), config)
+	if err != nil {
+		log.Fatalf("unmarshal config file error: %v", err)
+	}
+}
