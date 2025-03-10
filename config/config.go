@@ -36,6 +36,17 @@ type Config struct {
 		Db       int    `yaml:"db"`
 		PoolSize int    `yaml:"poolSize"`
 	} `yml:"redis"`
+	Mysql struct {
+		Host            string `yaml:"host"`
+		Username        string `yaml:"username"`
+		Password        string `yaml:"password"`
+		Database        string `yaml:"database"`
+		Port            int    `yaml:"port"`
+		Params          string `yaml:"params"`
+		MaxIdleConns    int    `yaml:"maxIdleConns"`
+		MaxOpenConns    int    `yaml:"maxOpenConns"`
+		ConnMaxLifetime int    `yaml:"connMaxLifetime"`
+	} `yml:"mysql"`
 
 	Etcd struct {
 		Endpoints   []string `yaml:"endpoints"`

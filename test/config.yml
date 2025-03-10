@@ -17,3 +17,11 @@ etcd:
     - 127.0.0.1:2379
   timeout: 2
 test: aaa
+
+mysql:
+  host: 192.168.0.11
+  port: 3306
+  username: root
+  password: 123456
+  database: test
+  params: charset=utf8mb4&parseTime=True&loc=Local
