@@ -37,16 +37,23 @@ func (httpServer *HttpServer) Init(addr string, auth IMiddleware, block bool, mi
 	middlewareList = append(middlewareList, logRequestParams())
 
 	httpServer.Energy.Use(middlewareList...)
-	protected := httpServer.Energy.Group("/")
-	protected.Use(auth.Middleware())
+	if auth != nil {
+		protected := httpServer.Energy.Group("/")
+		protected.Use(auth.Middleware())
 
-	for _, route := range httpServer.AllRoutes {
-		if route.Protected {
-			registerRoutes(protected, route, httpServer)
-		} else {
+		for _, route := range httpServer.AllRoutes {
+			if route.Protected {
+				registerRoutes(protected, route, httpServer)
+			} else {
+				registerRoutes(nil, route, httpServer)
+			}
+		}
+	} else {
+		for _, route := range httpServer.AllRoutes {
 			registerRoutes(nil, route, httpServer)
 		}
 	}
+
 	if block {
 		logger.Info(httpServer.Name, " HTTP server started at", addr)
 		err := httpServer.Energy.Run(addr)
