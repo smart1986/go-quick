@@ -35,17 +35,13 @@ func InitSchedule(timeComponent system.ITime) {
 				for _, task := range tasks {
 					now := timeComponent.GetNowSecond()
 					if task.Interval == 0 && task.StartTime == 0 {
-						go func() {
-							doTask(task, now)
-						}()
+						doTask(task, now)
 						delete(tasks, task.TaskName)
 						logger.Debug("task:", task.TaskName, " remove")
 						continue
 					}
 					if task.StartTime == 0 {
-						go func() {
-							doTask(task, now)
-						}()
+						doTask(task, now)
 						continue
 					}
 					if task.Interval == 0 {

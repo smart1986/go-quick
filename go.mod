@@ -5,6 +5,7 @@ go 1.23.1
 require (
 	github.com/gin-gonic/gin v1.10.0
 	github.com/google/uuid v1.3.1
+	github.com/panjf2000/ants/v2 v2.11.2
 	github.com/redis/go-redis/v9 v9.6.1
 	go.etcd.io/etcd/client/v3 v3.5.16
 	go.mongodb.org/mongo-driver v1.17.1
@@ -57,7 +58,7 @@ require (
 	golang.org/x/arch v0.8.0 // indirect
 	golang.org/x/crypto v0.26.0 // indirect
 	golang.org/x/net v0.25.0 // indirect
-	golang.org/x/sync v0.8.0 // indirect
+	golang.org/x/sync v0.11.0 // indirect
 	golang.org/x/sys v0.23.0 // indirect
 	golang.org/x/text v0.17.0 // indirect
 	google.golang.org/genproto v0.0.0-20230822172742-b8732ec3820d // indirect
