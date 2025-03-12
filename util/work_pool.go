@@ -6,7 +6,7 @@ import (
 )
 
 type WorkerPool struct {
-	ants.Pool
+	*ants.Pool
 }
 
 func (w *WorkerPool) OnSystemExit() {
