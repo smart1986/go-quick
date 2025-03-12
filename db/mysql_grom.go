@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/smart1986/go-quick/config"
 	"github.com/smart1986/go-quick/logger"
+	"github.com/smart1986/go-quick/system"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 	"time"
@@ -53,6 +54,7 @@ func (q *QMysql) InitMysql(c *config.Config) {
 	sqlDB.SetMaxIdleConns(maxIdleConnect)
 	sqlDB.SetConnMaxLifetime(maxLifeTime)
 	q.SqlDb = sqlDB
+	system.RegisterExitHandler(q)
 	logger.Info("Connected to Mysql Successfully, Addr: ", c.Mysql.Host, " Port: ", c.Mysql.Port, " Database: ", c.Mysql.Database)
 }
 
