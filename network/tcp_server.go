@@ -4,6 +4,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/smart1986/go-quick/config"
 	"github.com/smart1986/go-quick/logger"
+	"github.com/smart1986/go-quick/system"
 	"net"
 	"reflect"
 	"runtime"
@@ -35,6 +36,17 @@ type ConnectContext struct {
 	Session       map[string]interface{}
 }
 
+func (t *TcpServer) OnSystemExit() {
+	t.Running = false
+	Clients.Range(func(key, value interface{}) bool {
+		client := value.(*ConnectContext)
+		client.Running = false
+		client.Conn.Close()
+		return true
+	})
+	logger.Info("TcpServer released")
+}
+
 func (t *TcpServer) Start(c *config.Config) {
 	if t.SocketHandlerPacket == nil {
 		panic("SocketHandlerPacket must be provided")
@@ -54,7 +66,6 @@ func (t *TcpServer) Start(c *config.Config) {
 		logger.Error("Error starting TCP server:", err)
 		return
 	}
-	defer listener.Close()
 	logger.Info("Server started on :", c.Server.Addr)
 	t.Running = true
 
@@ -62,15 +73,18 @@ func (t *TcpServer) Start(c *config.Config) {
 	if t.IdleTimeout > 0 {
 		go t.checkTimeouts()
 	}
-
-	for t.Running {
-		conn, err := listener.Accept()
-		if err != nil {
-			logger.Error("Error accepting connection:", err)
-			continue
+	system.RegisterExitHandler(t)
+	go func() {
+		for t.Running {
+			conn, err := listener.Accept()
+			if err != nil {
+				logger.Error("Error accepting connection:", err)
+				continue
+			}
+			go handleConnection(conn, t)
 		}
-		go handleConnection(conn, t)
-	}
+	}()
+
 }
 
 func (t *TcpServer) checkTimeouts() {

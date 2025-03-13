@@ -82,7 +82,7 @@ func (c *Connector) HandleConnection() {
 			logger.Error("Recovered from panic:", r)
 		}
 		logger.Debug("Connection closed")
-		c.Conn.Close()
+		c.Close()
 	}()
 
 	for c.Running {
@@ -137,5 +137,7 @@ func (c *Connector) SendMessage(msg *DataMessage) error {
 }
 
 func (c *Connector) Close() {
+	c.reconnecting = false
 	c.Running = false
+	c.Conn.Close()
 }

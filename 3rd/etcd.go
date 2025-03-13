@@ -4,52 +4,53 @@ import (
 	"context"
 	"github.com/smart1986/go-quick/config"
 	"github.com/smart1986/go-quick/logger"
+	"github.com/smart1986/go-quick/system"
 	clientv3 "go.etcd.io/etcd/client/v3"
-	"sync"
 	"time"
 )
 
-var InstanceEtcd *clientv3.Client
-var NodesInfo map[string][]byte
-var changeHandler func(event *clientv3.Event, key string, value []byte)
+type (
+	EtcdClient struct {
+		*clientv3.Client
+		ChangeHandler func(event *clientv3.Event, key string, value []byte)
+		NodesInfo     map[string][]byte
+	}
+)
 
-func InitEtcd(node string, selfAddr string, value string, changeFunc func(event *clientv3.Event, key string, value []byte)) {
-	changeHandler = changeFunc
-	wg := &sync.WaitGroup{}
-	wg.Add(1)
-	go doInit(node, selfAddr, wg, value)
-	wg.Wait()
+var InstanceEtcd *EtcdClient
+
+func (e *EtcdClient) OnSystemExit() {
+	_ = e.Close()
+	logger.Info("Disconnected from Etcd")
 }
-func doInit(node string, selfAddr string, wg *sync.WaitGroup, value string) {
+
+func InitEtcd(config *config.Config) {
+	client := &EtcdClient{}
 	cli, err := clientv3.New(clientv3.Config{
-		Endpoints:   config.GlobalConfig.Etcd.Endpoints,
-		DialTimeout: time.Duration(config.GlobalConfig.Etcd.DialTimeout) * time.Second,
+		Endpoints:   config.Etcd.Endpoints,
+		DialTimeout: time.Duration(config.Etcd.DialTimeout) * time.Second,
 	})
 	if err != nil {
 		panic(err)
 	}
-	defer func(cli *clientv3.Client) {
-		_ = cli.Close()
-	}(cli)
-
-	InstanceEtcd = cli
-
-	registerAndWatch(node, selfAddr, wg, value)
+	client.Client = cli
+	system.RegisterExitHandler(client)
+	InstanceEtcd = client
 }
 
-func registerAndWatch(node string, selfAddr string, wg *sync.WaitGroup, value string) {
-
+func (e *EtcdClient) RegisterAndWatch(node string, selfAddr string, value string, changeHandler func(event *clientv3.Event, key string, value []byte)) {
+	e.ChangeHandler = changeHandler
 	leaseResp, err := InstanceEtcd.Grant(context.Background(), 2)
 	if err != nil {
 		panic(err)
 	}
-	resp, err := InstanceEtcd.Get(context.Background(), "", clientv3.WithPrefix())
+	resp, err := InstanceEtcd.Get(context.Background(), node, clientv3.WithPrefix())
 	if err != nil {
 		panic(err)
 	}
-	NodesInfo = make(map[string][]byte)
+	e.NodesInfo = make(map[string][]byte)
 	for _, kv := range resp.Kvs {
-		NodesInfo[string(kv.Key)] = kv.Value
+		e.NodesInfo[string(kv.Key)] = kv.Value
 		logger.Debug("Key:", string(kv.Key), " Value:", string(kv.Value))
 	}
 	// Put a key with the lease
@@ -69,29 +70,28 @@ func registerAndWatch(node string, selfAddr string, wg *sync.WaitGroup, value st
 			<-ch
 		}
 	}()
-	//go func() {
-	rch := InstanceEtcd.Watch(context.Background(), "", clientv3.WithPrefix()) // <-chan WatchResponse
-	wg.Done()
-	for watchResp := range rch {
-		if watchResp.Err() != nil {
-			logger.Debugf("Watch error: %v", watchResp.Err())
-			continue
-		}
-		for _, ev := range watchResp.Events {
-			logger.Debugf("Type: %s Key:%s Value:%s", ev.Type, ev.Kv.Key, ev.Kv.Value)
-			if ev.Type == clientv3.EventTypePut {
-				NodesInfo[string(ev.Kv.Key)] = ev.Kv.Value
-			} else if ev.Type == clientv3.EventTypeDelete {
-				delete(NodesInfo, string(ev.Kv.Key))
-			} else {
-				logger.Warnf("Unknown event type %s", ev.Type)
+	go func() {
+		rch := InstanceEtcd.Watch(context.Background(), node, clientv3.WithPrefix()) // <-chan WatchResponse
+		for watchResp := range rch {
+			if watchResp.Err() != nil {
+				logger.Debugf("Watch error: %v", watchResp.Err())
+				continue
 			}
-			if changeHandler != nil {
-				changeHandler(ev, string(ev.Kv.Key), ev.Kv.Value)
+			for _, ev := range watchResp.Events {
+				logger.Debugf("Type: %s Key:%s Value:%s", ev.Type, ev.Kv.Key, ev.Kv.Value)
+				if ev.Type == clientv3.EventTypePut {
+					e.NodesInfo[string(ev.Kv.Key)] = ev.Kv.Value
+				} else if ev.Type == clientv3.EventTypeDelete {
+					delete(e.NodesInfo, string(ev.Kv.Key))
+				} else {
+					logger.Warnf("Unknown event type %s", ev.Type)
+				}
+				if e.ChangeHandler != nil {
+					e.ChangeHandler(ev, string(ev.Kv.Key), ev.Kv.Value)
+				}
 			}
 		}
-	}
 
-	//}()
+	}()
 
 }

@@ -1,10 +1,13 @@
 package mytest
 
 import (
+	"context"
 	third "github.com/smart1986/go-quick/3rd"
 	"github.com/smart1986/go-quick/config"
 	"github.com/smart1986/go-quick/logger"
 	"github.com/smart1986/go-quick/network"
+	"github.com/smart1986/go-quick/system"
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"testing"
 	"time"
 )
@@ -13,8 +16,17 @@ func TestServer(tt *testing.T) {
 	config.InitConfig("./config.yml", &config.Config{})
 	logger.NewLogger(config.GlobalConfig)
 	//go func() {
-	third.InitEtcd("/test/", "192.168.0.106", "", nil)
+	third.InitEtcd(config.GlobalConfig)
+	third.InstanceEtcd.RegisterAndWatch("/test/", "192.168.0.106", "", nil)
 	//}()
+	value, err := third.InstanceEtcd.Get(context.Background(), "/106", clientv3.WithPrefix())
+	if err != nil {
+		panic(err)
+	}
+	for _, kv := range value.Kvs {
+		logger.Debug("Key:", string(kv.Key), " Value:", string(kv.Value))
+	}
+
 	tcpNet := network.TcpServer{
 		SocketHandlerPacket: &network.DefaultHandlerPacket{},
 		Encoder:             &network.DefaultEncoder{},
@@ -27,6 +39,8 @@ func TestServer(tt *testing.T) {
 	network.RegisterMessageHandler(t)
 
 	tcpNet.Start(config.GlobalConfig)
+
+	system.WaitElegantExit()
 }
 
 type (

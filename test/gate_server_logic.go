@@ -48,7 +48,7 @@ func CreateClientPool(path string, addr string, size int) []*network.Connector {
 }
 
 func CreateClientPoolFromEtcd(path string, size uint16) {
-	for p := range third.NodesInfo {
+	for p := range third.InstanceEtcd.NodesInfo {
 		split := strings.Split(p, "/")
 		if len(split) < 2 {
 			continue

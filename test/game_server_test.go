@@ -12,7 +12,8 @@ func TestGameServer(tt *testing.T) {
 	config.InitConfig("./config.yml", &config.Config{})
 	logger.NewLogger(config.GlobalConfig)
 	//go func() {
-	third.InitEtcd("game", "192.168.0.106:8080", "", nil)
+	third.InitEtcd(config.GlobalConfig)
+	third.InstanceEtcd.RegisterAndWatch("game", "192.168.0.106:8080", "", nil)
 	//}()
 	tcpNet := network.TcpServer{
 		SocketHandlerPacket: &network.DefaultHandlerPacket{},

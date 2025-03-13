@@ -21,7 +21,8 @@ func TestGate(t *testing.T) {
 		panic(err)
 	}
 	localAddr := localIp + ":" + s[1]
-	third.InitEtcd("gate", localAddr, "", OnNodeChange)
+	third.InitEtcd(config.GlobalConfig)
+	third.InstanceEtcd.RegisterAndWatch("gate", localAddr, "", OnNodeChange)
 	CreateClientPoolFromEtcd("game", 1)
 
 	tcpNet := network.TcpServer{
