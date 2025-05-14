@@ -95,9 +95,15 @@ func logRequestParams() gin.HandlerFunc {
 	}
 }
 
-func (httpServer *HttpServer) InitNoAuth(addr string, block bool) {
+func (httpServer *HttpServer) InitNoAuth(addr string, block bool, middleware ...IMiddleware) {
 
 	httpServer.Energy = gin.Default()
+	var middlewareList []gin.HandlerFunc
+	for _, m := range middleware {
+		middlewareList = append(middlewareList, m.Middleware())
+	}
+	middlewareList = append(middlewareList, logRequestParams())
+	httpServer.Energy.Use(middlewareList...)
 	for _, route := range httpServer.AllRoutes {
 		registerRoutes(nil, route, httpServer)
 	}
