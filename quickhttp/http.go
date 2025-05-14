@@ -71,6 +71,16 @@ func (httpServer *HttpServer) Init(addr string, auth IMiddleware, block bool, mi
 	}
 }
 
+type responseBodyWriter struct {
+	gin.ResponseWriter
+	body *bytes.Buffer
+}
+
+func (w responseBodyWriter) Write(b []byte) (int, error) {
+	w.body.Write(b) // 缓存响应内容
+	return w.ResponseWriter.Write(b)
+}
+
 func logRequestParams() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if logger.DefaultLogger.LogLevel == zap.DebugLevel {
@@ -81,13 +91,19 @@ func logRequestParams() gin.HandlerFunc {
 			logger.Debugf("Request: %s %s %s\n", c.Request.Method, c.Request.RequestURI, string(reqBody))
 			c.Request.Body = io.NopCloser(bytes.NewBuffer(reqBody))
 			// 执行请求处理程序和其他中间件函数
+
+			// 替换默认的 ResponseWriter
+			writer := &responseBodyWriter{
+				ResponseWriter: c.Writer,
+				body:           bytes.NewBufferString(""),
+			}
+			c.Writer = writer
 			c.Next()
 
 			// 记录回包内容和处理时间
 			end := time.Now()
 			latency := end.Sub(start)
-			//respBody := string(c.Writer.Body.Bytes())
-			logger.Debugf(" Response: %s %s %s \n", c.Request.Method, c.Request.RequestURI, latency)
+			logger.Debugf(" Response: %s %s %s %s \n", c.Request.Method, c.Request.RequestURI, latency, writer.body.String())
 		} else {
 			c.Next()
 		}
