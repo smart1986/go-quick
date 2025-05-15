@@ -41,7 +41,9 @@ func (t *TcpServer) OnSystemExit() {
 	Clients.Range(func(key, value interface{}) bool {
 		client := value.(*ConnectContext)
 		client.Running = false
-		client.Conn.Close()
+		if client.Conn != nil {
+			client.Conn.Close()
+		}
 		return true
 	})
 	logger.Info("TcpServer released")
@@ -136,6 +138,7 @@ func handleConnection(conn net.Conn, t *TcpServer) {
 	for client.Running {
 		array, done := t.SocketHandlerPacket.HandlePacket(conn)
 		if !done {
+			logger.Error("Connection lost, stopping client:", client.ConnectId)
 			client.Running = false
 			return
 		}

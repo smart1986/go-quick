@@ -137,7 +137,11 @@ func (c *Connector) SendMessage(msg *DataMessage) error {
 }
 
 func (c *Connector) Close() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.reconnecting = false
 	c.Running = false
-	c.Conn.Close()
+	if c.Conn != nil {
+		c.Conn.Close()
+	}
 }
