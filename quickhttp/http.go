@@ -180,6 +180,6 @@ func registerRoutes(group *gin.RouterGroup, route *Route, httpServer *HttpServer
 			logger.Error(httpServer.Name, " Invalid HTTP method", "method", route.Method)
 		}
 	}
-	logger.Info(httpServer.Name, " Route registered ,method:", route.Method, ",path:", route.Path)
+	logger.Info(httpServer.Name, " Route registered, method:", route.Method, ", path:", route.Path)
 
 }
