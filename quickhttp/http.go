@@ -83,6 +83,11 @@ func (w responseBodyWriter) Write(b []byte) (int, error) {
 
 func logRequestParams() gin.HandlerFunc {
 	return func(c *gin.Context) {
+		if c.Request.RequestURI == "/health" {
+			c.Next()
+			return
+		}
+
 		if logger.DefaultLogger.LogLevel == zap.DebugLevel {
 			// 记录请求时间
 			start := time.Now()
