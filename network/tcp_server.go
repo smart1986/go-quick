@@ -127,6 +127,7 @@ func handleConnection(conn net.Conn, t *TcpServer) {
 		Encoder:       t.Encoder,
 		PacketHandler: t.SocketHandlerPacket,
 		MessageRouter: t.Router,
+		Session:       make(map[string]interface{}),
 	}
 	Clients.Store(client.ConnectId.String(), client)
 
