@@ -11,7 +11,7 @@ import (
 func TestClient(t *testing.T) {
 	config.InitConfig("./config.yml", &config.Config{})
 	logger.NewLogger(config.GlobalConfig)
-	serverAddr := "127.0.0.1:20000"
+	serverAddr := "127.0.0.1:8888"
 	marshal := &network.DefaultHandlerPacket{}
 	connector := network.NewConnector(serverAddr, marshal, &network.DefaultEncoder{}, &network.DefaultDecoder{}, test)
 	err := connector.Connect()

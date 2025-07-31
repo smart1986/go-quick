@@ -32,6 +32,7 @@ func TestGate(t *testing.T) {
 		Router:              &GateRouter{},
 		IdleTimeout:         1 * time.Minute,
 	}
+	GateTcpServer = &tcpNet
 
 	tcpNet.Start(config.GlobalConfig)
 }

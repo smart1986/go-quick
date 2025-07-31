@@ -12,30 +12,38 @@ import (
 	"time"
 )
 
-type TcpServer struct {
-	Running             bool
-	SocketHandlerPacket IHandlerPacket
-	Encoder             IEncode
-	Decoder             IDecode
-	Router              Router
-	IdleTimeout         time.Duration
-	Clients             sync.Map
-}
+type (
+	TcpServer struct {
+		running             bool
+		SocketHandlerPacket IHandlerPacket
+		Encoder             IEncode
+		Decoder             IDecode
+		Router              Router
+		IdleTimeout         time.Duration
+		clients             sync.Map
+		SessionHandler      ISessionHandler
+	}
+	ConnectContext struct {
+		ConnectId     uuid.UUID
+		lastActive    time.Time
+		Conn          net.Conn
+		Running       bool
+		Encoder       IEncode
+		PacketHandler IHandlerPacket
+		MessageRouter Router
+		Session       map[string]interface{}
+	}
 
-type ConnectContext struct {
-	ConnectId     uuid.UUID
-	lastActive    time.Time
-	Conn          net.Conn
-	Running       bool
-	Encoder       IEncode
-	PacketHandler IHandlerPacket
-	MessageRouter Router
-	Session       map[string]interface{}
-}
+	ISessionHandler interface {
+		OnAccept(context *ConnectContext)
+		OnClose(context *ConnectContext)
+		OnIdleTimeout(context *ConnectContext)
+	}
+)
 
 func (t *TcpServer) OnSystemExit() {
-	t.Running = false
-	t.Clients.Range(func(key, value interface{}) bool {
+	t.running = false
+	t.clients.Range(func(key, value interface{}) bool {
 		client := value.(*ConnectContext)
 		client.Running = false
 		if client.Conn != nil {
@@ -66,8 +74,8 @@ func (t *TcpServer) Start(c *config.Config) {
 		return
 	}
 	logger.Info("Server started on :", c.Server.Addr)
-	t.Running = true
-	t.Clients = sync.Map{}
+	t.running = true
+	t.clients = sync.Map{}
 
 	// Start a global ticker to check for timeouts
 	if t.IdleTimeout > 0 {
@@ -75,7 +83,7 @@ func (t *TcpServer) Start(c *config.Config) {
 	}
 	system.RegisterExitHandler(t)
 	go func() {
-		for t.Running {
+		for t.running {
 			conn, err := listener.Accept()
 			if err != nil {
 				logger.Error("Error accepting connection:", err)
@@ -90,7 +98,7 @@ func (t *TcpServer) GetConnectContext(connectId string) *ConnectContext {
 	if connectId == "" {
 		return nil
 	}
-	context, ok := t.Clients.Load(connectId)
+	context, ok := t.clients.Load(connectId)
 	if !ok {
 		logger.Error("ConnectContext not found for ConnectId:", connectId)
 		return nil
@@ -109,13 +117,16 @@ func (t *TcpServer) checkTimeouts() {
 	defer ticker.Stop()
 
 	for range ticker.C {
-		t.Clients.Range(func(key, value interface{}) bool {
+		t.clients.Range(func(key, value interface{}) bool {
 			client := value.(*ConnectContext)
 			if time.Since(client.lastActive) > t.IdleTimeout {
 				logger.Debug("ConnectContext timed out:", client.Conn.RemoteAddr())
 				client.Running = false
 				client.Conn.Close()
-				t.Clients.Delete(key)
+				t.clients.Delete(key)
+				if t.SessionHandler != nil {
+					t.SessionHandler.OnIdleTimeout(client)
+				}
 			}
 			return true
 		})
@@ -143,12 +154,19 @@ func handleConnection(conn net.Conn, t *TcpServer) {
 		MessageRouter: t.Router,
 		Session:       make(map[string]interface{}),
 	}
-	t.Clients.Store(client.ConnectId.String(), client)
+	t.clients.Store(client.ConnectId.String(), client)
 	logger.Debug("New client connected:", conn.RemoteAddr(), ", ConnectId:", client.ConnectId)
+	if t.SessionHandler != nil {
+		t.SessionHandler.OnAccept(client)
+	}
 
 	defer func() {
 		client.Running = false
-		t.Clients.Delete(client.ConnectId)
+		t.clients.Delete(client.ConnectId)
+		if t.SessionHandler != nil {
+			t.SessionHandler.OnClose(client)
+		}
+
 	}()
 
 	for client.Running {

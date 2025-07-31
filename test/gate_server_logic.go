@@ -12,6 +12,10 @@ import (
 	"strings"
 )
 
+var (
+	GateTcpServer *network.TcpServer
+)
+
 type (
 	GateRouter     struct{}
 	GateDataHeader struct {
@@ -98,10 +102,9 @@ func gameServerHandler(message *network.DataMessage) {
 		logger.Error("Invalid UUID:", err)
 		return
 	}
-
-	uuid.NewString()
-	if client, exists := network.Clients.Load(id.String()); exists {
-		client.(*network.ConnectContext).SendMessage(message)
+	context := GateTcpServer.GetConnectContext(id.String())
+	if context != nil {
+		context.SendMessage(message)
 	}
 }
 
