@@ -50,14 +50,22 @@ func (c *Connector) Connect() error {
 }
 
 func (c *Connector) Reconnect() error {
+	c.mu.Lock()
 	if !c.Running {
+		c.mu.Unlock()
 		return fmt.Errorf("connector is not running")
 	}
 	if c.reconnecting {
+		c.mu.Unlock()
 		return fmt.Errorf("already reconnecting")
 	}
 	c.reconnecting = true
-	defer func() { c.reconnecting = false }()
+	c.mu.Unlock()
+	defer func() {
+		c.mu.Lock()
+		c.reconnecting = false
+		c.mu.Unlock()
+	}()
 
 	maxAttempts := 5
 	for attempts := 0; attempts < maxAttempts; attempts++ {
