@@ -118,7 +118,6 @@ func handleConnection(conn net.Conn, t *TcpServer) {
 		}
 	}()
 
-	logger.Debug("New client connected:", conn.RemoteAddr())
 	client := &ConnectContext{
 		Conn:          conn,
 		ConnectId:     uuid.New(),
@@ -130,6 +129,7 @@ func handleConnection(conn net.Conn, t *TcpServer) {
 		Session:       make(map[string]interface{}),
 	}
 	Clients.Store(client.ConnectId.String(), client)
+	logger.Debug("New client connected:", conn.RemoteAddr(), ", ConnectId:", client.ConnectId)
 
 	defer func() {
 		client.Running = false
