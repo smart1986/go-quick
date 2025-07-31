@@ -12,10 +12,6 @@ import (
 	"time"
 )
 
-var (
-	Clients sync.Map
-)
-
 type TcpServer struct {
 	Running             bool
 	SocketHandlerPacket IHandlerPacket
@@ -23,6 +19,7 @@ type TcpServer struct {
 	Decoder             IDecode
 	Router              Router
 	IdleTimeout         time.Duration
+	Clients             sync.Map
 }
 
 type ConnectContext struct {
@@ -38,7 +35,7 @@ type ConnectContext struct {
 
 func (t *TcpServer) OnSystemExit() {
 	t.Running = false
-	Clients.Range(func(key, value interface{}) bool {
+	t.Clients.Range(func(key, value interface{}) bool {
 		client := value.(*ConnectContext)
 		client.Running = false
 		if client.Conn != nil {
@@ -70,6 +67,7 @@ func (t *TcpServer) Start(c *config.Config) {
 	}
 	logger.Info("Server started on :", c.Server.Addr)
 	t.Running = true
+	t.Clients = sync.Map{}
 
 	// Start a global ticker to check for timeouts
 	if t.IdleTimeout > 0 {
@@ -88,19 +86,36 @@ func (t *TcpServer) Start(c *config.Config) {
 	}()
 
 }
+func (t *TcpServer) GetConnectContext(connectId string) *ConnectContext {
+	if connectId == "" {
+		return nil
+	}
+	context, ok := t.Clients.Load(connectId)
+	if !ok {
+		logger.Error("ConnectContext not found for ConnectId:", connectId)
+		return nil
+	}
+	client, ok := context.(*ConnectContext)
+	if !ok {
+		logger.Error("Invalid ConnectContext type for ConnectId:", connectId)
+		return nil
+	}
+	return client
+
+}
 
 func (t *TcpServer) checkTimeouts() {
 	ticker := time.NewTicker(1 * time.Minute)
 	defer ticker.Stop()
 
 	for range ticker.C {
-		Clients.Range(func(key, value interface{}) bool {
+		t.Clients.Range(func(key, value interface{}) bool {
 			client := value.(*ConnectContext)
 			if time.Since(client.lastActive) > t.IdleTimeout {
 				logger.Debug("ConnectContext timed out:", client.Conn.RemoteAddr())
 				client.Running = false
 				client.Conn.Close()
-				Clients.Delete(key)
+				t.Clients.Delete(key)
 			}
 			return true
 		})
@@ -128,12 +143,12 @@ func handleConnection(conn net.Conn, t *TcpServer) {
 		MessageRouter: t.Router,
 		Session:       make(map[string]interface{}),
 	}
-	Clients.Store(client.ConnectId.String(), client)
+	t.Clients.Store(client.ConnectId.String(), client)
 	logger.Debug("New client connected:", conn.RemoteAddr(), ", ConnectId:", client.ConnectId)
 
 	defer func() {
 		client.Running = false
-		Clients.Delete(client.ConnectId)
+		t.Clients.Delete(client.ConnectId)
 	}()
 
 	for client.Running {
