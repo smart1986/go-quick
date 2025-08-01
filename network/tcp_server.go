@@ -37,6 +37,7 @@ type (
 	ISessionHandler interface {
 		OnAccept(context *ConnectContext)
 		OnClose(context *ConnectContext)
+		OnMessageReceived(context *ConnectContext, message *DataMessage) interface{}
 		OnIdleTimeout(context *ConnectContext)
 	}
 )
@@ -48,6 +49,9 @@ func (t *TcpServer) OnSystemExit() {
 		client.Running = false
 		if client.Conn != nil {
 			client.Conn.Close()
+			if t.SessionHandler != nil {
+				t.SessionHandler.OnClose(client)
+			}
 		}
 		return true
 	})
@@ -181,7 +185,13 @@ func handleConnection(conn net.Conn, t *TcpServer) {
 
 		dataMessage := t.Decoder.Decode(array)
 		logger.Debug("Received data message:", dataMessage)
-		client.Execute(dataMessage)
+		if t.SessionHandler != nil {
+			received := t.SessionHandler.OnMessageReceived(client, dataMessage)
+			client.Execute(received)
+		} else {
+			client.Execute(dataMessage)
+		}
+
 	}
 }
 
@@ -191,7 +201,7 @@ func printMessageHandler() {
 	}
 }
 
-func (c *ConnectContext) Execute(message *DataMessage) {
+func (c *ConnectContext) Execute(message interface{}) {
 	defer func() {
 		if r := recover(); r != nil {
 			buf := make([]byte, 1024)

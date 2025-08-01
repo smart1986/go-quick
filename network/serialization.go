@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/binary"
 	"github.com/smart1986/go-quick/logger"
-	"io"
 	"net"
 	"sync"
 )
@@ -39,11 +38,7 @@ func (dm *DefaultHandlerPacket) HandlePacket(conn net.Conn) ([]byte, bool) {
 	for totalRead < 4 {
 		n, err := conn.Read(header[totalRead:])
 		if err != nil {
-			if err == io.EOF {
-				logger.Debug("ConnectContext disconnected:", conn.RemoteAddr())
-			} else {
-				logger.Debug("Error reading header:", err)
-			}
+			logger.Debug("ConnectContext disconnected:", conn.RemoteAddr(), err)
 			return nil, false
 		}
 		totalRead += n
@@ -51,30 +46,28 @@ func (dm *DefaultHandlerPacket) HandlePacket(conn net.Conn) ([]byte, bool) {
 
 	var length uint32
 	err := binary.Read(bytes.NewReader(header), binary.BigEndian, &length)
-	if err != nil {
-		logger.Error("Error parsing length:", err)
+	if err != nil || length < 4 {
+		logger.Error("Error parsing length or invalid length:", err, length)
 		return nil, false
 	}
 
-	logger.Debugf("Packet body length: %d bytes", length)
-
 	bodyLength := length - 4
 	body := bufPool.Get().([]byte)[:bodyLength]
-	defer bufPool.Put(body)
 	totalRead = 0
 	for totalRead < int(bodyLength) {
 		n, err := conn.Read(body[totalRead:])
 		if err != nil {
-			if err == io.EOF {
-				logger.Debug("ConnectContext disconnected:", conn.RemoteAddr())
-			} else {
-				logger.Error("Error reading body:", err)
-			}
+			logger.Debug("ConnectContext disconnected:", conn.RemoteAddr(), err)
+			bufPool.Put(body)
 			return nil, false
 		}
 		totalRead += n
 	}
-	return body, true
+	// 拷贝一份，避免外部修改
+	result := make([]byte, bodyLength)
+	copy(result, body)
+	bufPool.Put(body)
+	return result, true
 }
 
 func (dm *DefaultHandlerPacket) ToPacket(data []byte) ([]byte, error) {

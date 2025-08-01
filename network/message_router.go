@@ -8,11 +8,11 @@ var MessageHandler = make(map[int32]MessageExecutor)
 
 type (
 	Router interface {
-		Route(c *ConnectContext, dataMessage *DataMessage)
+		Route(c *ConnectContext, dataMessage interface{})
 	}
 
 	MessageExecutor interface {
-		Execute(c *ConnectContext, dataMessage *DataMessage) *DataMessage
+		Execute(c *ConnectContext, dataMessage interface{}) *DataMessage
 		MsgId() int32
 	}
 
