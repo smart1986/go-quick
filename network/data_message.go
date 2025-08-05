@@ -32,3 +32,17 @@ func NewDataMessage(header interface{}, msg []byte) *DataMessage {
 		Msg:    msg,
 	}
 }
+func NewFailDataMessage(header interface{}, code int16) *DataMessage {
+	if dataHeader, ok := header.(*DataHeader); ok {
+		dataHeader.SetCode(code)
+	} else if dataHeader, ok := header.(IDataHeader); ok {
+		dataHeader.SetCode(code)
+	} else {
+		return nil
+	}
+	return &DataMessage{
+		Header: header,
+		Msg:    nil,
+	}
+
+}
