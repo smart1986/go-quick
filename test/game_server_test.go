@@ -23,7 +23,7 @@ func TestGameServer(tt *testing.T) {
 	}
 
 	t := &GameTestServerHandler{}
-	network.RegisterMessageHandler(t)
+	network.RegisterMessageHandler(t, false)
 
 	tcpNet.Start(config.GlobalConfig)
 }
@@ -33,7 +33,7 @@ type (
 	//GameMessageRouter     struct{}
 )
 
-func (receiver *GameTestServerHandler) Execute(c *network.ConnectContext, dataMessage *network.DataMessage) *network.DataMessage {
+func (receiver *GameTestServerHandler) Execute(connectIdentify interface{}, c *network.ConnectContext, dataMessage *network.DataMessage) *network.DataMessage {
 	logger.Debug("Received message:", dataMessage)
 	c.SendMessage(dataMessage)
 	return nil

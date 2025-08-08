@@ -14,24 +14,26 @@ import (
 
 type (
 	TcpServer struct {
-		running             bool
-		SocketHandlerPacket IHandlerPacket
-		Encoder             IEncode
-		Decoder             IDecode
-		Router              Router
-		IdleTimeout         time.Duration
-		clients             sync.Map
-		SessionHandler      ISessionHandler
+		running               bool
+		SocketHandlerPacket   IHandlerPacket
+		Encoder               IEncode
+		Decoder               IDecode
+		Router                Router
+		IdleTimeout           time.Duration
+		clients               sync.Map
+		SessionHandler        ISessionHandler
+		ConnectIdentifyParser IConnectIdentifyParser
 	}
 	ConnectContext struct {
-		ConnectId     uuid.UUID
-		lastActive    time.Time
-		Conn          net.Conn
-		Running       bool
-		Encoder       IEncode
-		PacketHandler IHandlerPacket
-		MessageRouter Router
-		Session       map[string]interface{}
+		ConnectId             uuid.UUID
+		lastActive            time.Time
+		Conn                  net.Conn
+		Running               bool
+		Encoder               IEncode
+		PacketHandler         IHandlerPacket
+		MessageRouter         Router
+		ConnectIdentifyParser IConnectIdentifyParser
+		Session               map[string]interface{}
 	}
 
 	ISessionHandler interface {
@@ -157,14 +159,15 @@ func handleConnection(conn net.Conn, t *TcpServer) {
 	}()
 
 	client := &ConnectContext{
-		Conn:          conn,
-		ConnectId:     uuid.New(),
-		Running:       true,
-		lastActive:    time.Now(),
-		Encoder:       t.Encoder,
-		PacketHandler: t.SocketHandlerPacket,
-		MessageRouter: t.Router,
-		Session:       make(map[string]interface{}),
+		Conn:                  conn,
+		ConnectId:             uuid.New(),
+		Running:               true,
+		lastActive:            time.Now(),
+		Encoder:               t.Encoder,
+		PacketHandler:         t.SocketHandlerPacket,
+		MessageRouter:         t.Router,
+		Session:               make(map[string]interface{}),
+		ConnectIdentifyParser: t.ConnectIdentifyParser,
 	}
 	t.clients.Store(client.ConnectId.String(), client)
 	logger.Debug("New client connected:", conn.RemoteAddr(), ", ConnectId:", client.ConnectId)
@@ -209,7 +212,16 @@ func (c *ConnectContext) Execute(message *DataMessage) {
 			logger.Error("Stack trace:", string(buf[:n]))
 		}
 	}()
-	c.MessageRouter.Route(c, message)
+	var identify interface{}
+	if c.ConnectIdentifyParser != nil {
+		id, err := c.ConnectIdentifyParser.ParseConnectIdentify(c)
+		if err != nil {
+			logger.Error("Error parsing connect identify:", err)
+			return
+		}
+		identify = id
+	}
+	c.MessageRouter.Route(identify, c, message)
 }
 
 func (c *ConnectContext) SendMessage(msg *DataMessage) {

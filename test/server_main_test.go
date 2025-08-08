@@ -34,7 +34,7 @@ func TestServer(tt *testing.T) {
 	}
 
 	t := &TestServerHandler{}
-	network.RegisterMessageHandler(t)
+	network.RegisterMessageHandler(t, false)
 
 	tcpNet.Start(config.GlobalConfig)
 
@@ -46,7 +46,7 @@ type (
 	TestSessionHandler struct{}
 )
 
-func (receiver *TestServerHandler) Execute(c *network.ConnectContext, dataMessage *network.DataMessage) *network.DataMessage {
+func (receiver *TestServerHandler) Execute(connectIdentify interface{}, c *network.ConnectContext, dataMessage *network.DataMessage) *network.DataMessage {
 	logger.Info("Received message:", dataMessage)
 	c.SendMessage(dataMessage)
 	return nil

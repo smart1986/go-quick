@@ -108,7 +108,7 @@ func gameServerHandler(message *network.DataMessage) {
 	}
 }
 
-func (g *GateRouter) Route(c *network.ConnectContext, dataMessage *network.DataMessage) {
+func (g *GateRouter) Route(connectIdentify interface{}, c *network.ConnectContext, dataMessage *network.DataMessage) {
 	// Connects中随机一个
 	Connects := ConnectsMap["game"]
 	if len(Connects) == 0 {
