@@ -191,7 +191,7 @@ func handleConnection(conn net.Conn, t *TcpServer) {
 		client.lastActive = time.Now()
 
 		dataMessage := t.Decoder.Decode(array)
-		logger.Debug("Received data message:", dataMessage)
+		logger.Debug("Received data message, header:", dataMessage.Header, ", length:", len(dataMessage.Msg))
 		client.Execute(dataMessage)
 
 	}
@@ -233,7 +233,7 @@ func (c *ConnectContext) SendMessage(msg *DataMessage) {
 		return
 	}
 	_, err1 := c.Conn.Write(packet)
-	logger.Debug("Send data to client:", id, ",len:", len(packet))
+	logger.Debug("Send data to client:", id, ",len:", len(packet), ", header:", msg.Header.ToString())
 	if err1 != nil {
 		logger.Error("Error sending data:", err1)
 	}
