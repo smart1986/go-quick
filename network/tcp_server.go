@@ -152,10 +152,7 @@ func handleConnection(conn net.Conn, t *TcpServer) {
 		if r := recover(); r != nil {
 			logger.Error("Recovered from panic:", r)
 		}
-		err := conn.Close()
-		if err != nil {
-			logger.Error("Error closing connection:", err)
-		}
+		_ = conn.Close()
 	}()
 
 	client := &ConnectContext{
@@ -183,7 +180,7 @@ func handleConnection(conn net.Conn, t *TcpServer) {
 	for client.Running {
 		array, done := t.SocketHandlerPacket.HandlePacket(conn)
 		if !done {
-			logger.Error("Connection lost, stopping client:", client.ConnectId)
+			logger.Debug("Connection lost, stopping client:", client.ConnectId)
 			client.Running = false
 			return
 		}
@@ -199,7 +196,7 @@ func handleConnection(conn net.Conn, t *TcpServer) {
 
 func printMessageHandler() {
 	for k, v := range MessageHandler {
-		logger.Info("register msgId:", k, ",handler:", reflect.ValueOf(v).Type())
+		logger.Info("register msgId:", k, ",handler:", reflect.ValueOf(v.Handler).Type())
 	}
 }
 
