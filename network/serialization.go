@@ -1,124 +1,89 @@
 package network
 
 import (
-	"bytes"
 	"encoding/binary"
 	"github.com/smart1986/go-quick/logger"
+	"io"
 	"net"
-	"sync"
 )
 
 type (
 	DefaultHandlerPacket struct {
 	}
-	DefaultEncoder       struct{}
 	DefaultDecoder       struct{}
 	DefaultPacketHandler struct{}
 	IHandlerPacket       interface {
-		HandlePacket(conn net.Conn) ([]byte, bool)
-		ToPacket(data []byte) ([]byte, error)
-	}
-	IEncode interface {
-		Encode(d *DataMessage) []byte
+		HandlePacket(conn net.Conn, bufPool *BufPool) ([]byte, bool)
+		ToPacket(data []byte, bufPool *BufPool) ([]byte, error)
 	}
 	IDecode interface {
-		Decode(array []byte) *DataMessage
+		Decode(pool *BufPool, array []byte) *DataMessage
 	}
 )
 
-var bufPool = sync.Pool{
-	New: func() interface{} {
-		return make([]byte, 4096)
-	},
-}
+const MaxPacketSize = 4 * 1024
 
-func (dm *DefaultHandlerPacket) HandlePacket(conn net.Conn) ([]byte, bool) {
+// HandlePacket 读取并返回数据包，直接返回 bufPool 的内存
+// 调用方必须在处理完成后调用 bufPool.Put(body)
+func (dm *DefaultHandlerPacket) HandlePacket(conn net.Conn, bufPool *BufPool) ([]byte, bool) {
 	header := make([]byte, 4)
-	totalRead := 0
-	for totalRead < 4 {
-		n, err := conn.Read(header[totalRead:])
-		if err != nil {
-			logger.Debug("ConnectContext disconnected:", conn.RemoteAddr(), err)
-			return nil, false
-		}
-		totalRead += n
-	}
-
-	var length uint32
-	err := binary.Read(bytes.NewReader(header), binary.BigEndian, &length)
-	if err != nil || length < 4 {
-		logger.Error("Error parsing length or invalid length:", err, length)
+	if _, err := io.ReadFull(conn, header); err != nil {
+		logger.Debug("ConnectContext disconnected:", conn.RemoteAddr(), err)
 		return nil, false
 	}
 
-	bodyLength := length - 4
-	body := bufPool.Get().([]byte)[:bodyLength]
-	totalRead = 0
-	for totalRead < int(bodyLength) {
-		n, err := conn.Read(body[totalRead:])
-		if err != nil {
-			logger.Debug("ConnectContext disconnected:", conn.RemoteAddr(), err)
-			bufPool.Put(body)
-			return nil, false
-		}
-		totalRead += n
+	length := binary.BigEndian.Uint32(header)
+	if length < 4 || length > MaxPacketSize {
+		logger.Error("Invalid length:", length)
+		return nil, false
 	}
-	// 拷贝一份，避免外部修改
-	result := make([]byte, bodyLength)
-	copy(result, body)
-	bufPool.Put(body)
-	return result, true
+
+	bodyLength := int(length - 4)
+	body := bufPool.Get(bodyLength)
+	if cap(body) < bodyLength {
+		bufPool.Put(body) // 原 buffer 不够大，归还
+		body = make([]byte, bodyLength)
+	} else {
+		body = body[:bodyLength]
+	}
+
+	if _, err := io.ReadFull(conn, body); err != nil {
+		logger.Debug("ConnectContext disconnected:", conn.RemoteAddr(), err)
+		bufPool.Put(body)
+		return nil, false
+	}
+
+	return body, true // ⚠️ 调用方负责 bufPool.Put(body)
 }
 
-func (dm *DefaultHandlerPacket) ToPacket(data []byte) ([]byte, error) {
-	buf := new(bytes.Buffer)
+func (dm *DefaultHandlerPacket) ToPacket(data []byte, bufPool *BufPool) ([]byte, error) {
+	total := 4 + len(data)
 
-	totalLength := int32(4 + len(data))
-
-	if err := binary.Write(buf, binary.BigEndian, totalLength); err != nil {
-		logger.Error("Error encoding message")
-		return nil, err
+	var pkt []byte
+	if total <= MaxPacketSize {
+		pkt = bufPool.Get(total)
+	} else {
+		pkt = make([]byte, total) // 超出限制，单独分配
 	}
-	buf.Write(data)
-	return buf.Bytes(), nil
+
+	binary.BigEndian.PutUint32(pkt[:4], uint32(total))
+	copy(pkt[4:], data)
+	return pkt, nil
 }
 
-func (dm *DefaultEncoder) Encode(d *DataMessage) []byte {
-	buf := new(bytes.Buffer)
-	data := make([]byte, 4+2+len(d.Msg))
-	header := d.Header.(*DataHeader)
-
-	binary.BigEndian.PutUint32(data[0:4], uint32(header.MsgId))
-	binary.BigEndian.PutUint16(data[4:6], uint16(header.Code))
-	copy(data[6:], d.Msg)
-	buf.Write(data)
-	return buf.Bytes()
-}
-
-func (dm *DefaultDecoder) Decode(array []byte) *DataMessage {
-	buf := bytes.NewBuffer(array)
-
-	var msgId int32
-	if err := binary.Read(buf, binary.BigEndian, &msgId); err != nil {
+func (dm *DefaultDecoder) Decode(pool *BufPool, array []byte) *DataMessage {
+	if len(array) < 6 {
 		return nil
 	}
+	msgId := int32(binary.BigEndian.Uint32(array[0:4]))
+	code := int16(binary.BigEndian.Uint16(array[4:6]))
 
-	var code int16
-	if err := binary.Read(buf, binary.BigEndian, &code); err != nil {
-		return nil
-	}
+	n := len(array) - 6
+	payload := pool.Get(n)   // 小包来自池；大包内部会 fallback 到 make
+	copy(payload, array[6:]) // 拷贝，避免与 array 共享内存
 
-	msgLength := int32(len(array) - 6)
-	msg := make([]byte, msgLength)
-	if err := binary.Read(buf, binary.BigEndian, msg); err != nil {
-		return nil
-	}
-	header := &DataHeader{
-		MsgId: msgId,
-		Code:  code,
-	}
 	return &DataMessage{
-		Header: header,
-		Msg:    msg,
+		Header: &DataHeader{MsgId: msgId, Code: code},
+		Msg:    payload, // ✅ 上层用完记得 pool.Put(payload)
 	}
 }

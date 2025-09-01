@@ -13,7 +13,7 @@ func TestClient(t *testing.T) {
 	logger.NewLogger(config.GlobalConfig)
 	serverAddr := "127.0.0.1:8888"
 	marshal := &network.DefaultHandlerPacket{}
-	connector := network.NewConnector(serverAddr, marshal, &network.DefaultEncoder{}, &network.DefaultDecoder{}, test)
+	connector := network.NewConnector(serverAddr, marshal, &network.DefaultDecoder{}, &network.DefaultFramer{}, test)
 	err := connector.Connect()
 	if err != nil {
 		panic(err)

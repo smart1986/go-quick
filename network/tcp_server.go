@@ -1,6 +1,7 @@
 package network
 
 import (
+	"context"
 	"github.com/google/uuid"
 	"github.com/smart1986/go-quick/config"
 	"github.com/smart1986/go-quick/logger"
@@ -9,31 +10,39 @@ import (
 	"reflect"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
 type (
 	TcpServer struct {
-		running               bool
+		running int32
+		ctx     context.Context
+		cancel  context.CancelFunc
+		ln      net.Listener
+
 		SocketHandlerPacket   IHandlerPacket
-		Encoder               IEncode
 		Decoder               IDecode
+		Framer                IFramer
 		Router                Router
 		IdleTimeout           time.Duration
-		clients               sync.Map
 		SessionHandler        ISessionHandler
 		ConnectIdentifyParser IConnectIdentifyParser
+
+		BufPool *BufPool
+		clients sync.Map
 	}
 	ConnectContext struct {
 		ConnectId             uuid.UUID
 		lastActive            time.Time
 		Conn                  net.Conn
 		Running               bool
-		Encoder               IEncode
 		PacketHandler         IHandlerPacket
 		MessageRouter         Router
 		ConnectIdentifyParser IConnectIdentifyParser
 		Session               map[string]interface{}
+		BufPool               *BufPool
+		ServerFramer          IFramer
 	}
 
 	ISessionHandler interface {
@@ -43,28 +52,9 @@ type (
 	}
 )
 
-func (t *TcpServer) OnSystemExit() {
-	t.running = false
-	t.clients.Range(func(key, value interface{}) bool {
-		client := value.(*ConnectContext)
-		client.Running = false
-		if client.Conn != nil {
-			client.Conn.Close()
-			if t.SessionHandler != nil {
-				t.SessionHandler.OnClose(client)
-			}
-		}
-		return true
-	})
-	logger.Info("TcpServer released")
-}
-
 func (t *TcpServer) Start(c *config.Config) {
 	if t.SocketHandlerPacket == nil {
 		panic("SocketHandlerPacket must be provided")
-	}
-	if t.Encoder == nil {
-		panic("Encoder must be provided")
 	}
 	if t.Decoder == nil {
 		panic("Decoder must be provided")
@@ -72,126 +62,152 @@ func (t *TcpServer) Start(c *config.Config) {
 	if t.Router == nil {
 		panic("Router must be provided")
 	}
+	if t.Framer == nil {
+		t.Framer = &DefaultFramer{}
+	}
+	if t.BufPool == nil {
+		t.BufPool = NewBufPool()
+	}
+
 	printMessageHandler()
-	listener, err := net.Listen("tcp", c.Server.Addr)
+
+	ln, err := net.Listen("tcp", c.Server.Addr)
 	if err != nil {
 		logger.Error("Error starting TCP server:", err)
 		return
 	}
-	logger.Info("Server started on :", c.Server.Addr)
-	t.running = true
+	t.ln = ln
+	t.ctx, t.cancel = context.WithCancel(context.Background())
+	atomic.StoreInt32(&t.running, 1)
 	t.clients = sync.Map{}
 
-	// Start a global ticker to check for timeouts
-	if t.IdleTimeout > 0 {
-		go t.checkTimeouts()
-	}
+	logger.Info("Server started on:", c.Server.Addr)
 	system.RegisterExitHandler(t)
+
 	go func() {
-		for t.running {
-			conn, err := listener.Accept()
+		for atomic.LoadInt32(&t.running) == 1 {
+			conn, err := ln.Accept()
 			if err != nil {
+				// 关闭 listener 后 Accept 会返回错误，判断是否在关停
+				if atomic.LoadInt32(&t.running) == 0 {
+					return
+				}
 				logger.Error("Error accepting connection:", err)
 				continue
 			}
-			go handleConnection(conn, t)
+			go handleConnection(t.ctx, conn, t)
 		}
 	}()
-
 }
+
+func (t *TcpServer) OnSystemExit() {
+	// 幂等停止
+	if !atomic.CompareAndSwapInt32(&t.running, 1, 0) {
+		return
+	}
+	if t.cancel != nil {
+		t.cancel()
+	}
+	if t.ln != nil {
+		_ = t.ln.Close() // 解除 Accept 阻塞
+	}
+
+	// 关闭所有连接
+	t.clients.Range(func(key, value interface{}) bool {
+		t.CloseContext(value.(*ConnectContext))
+		return true
+	})
+	logger.Info("TcpServer released")
+}
+
 func (t *TcpServer) GetConnectContext(connectId string) *ConnectContext {
 	if connectId == "" {
 		return nil
 	}
-	context, ok := t.clients.Load(connectId)
-	if !ok {
-		logger.Error("ConnectContext not found for ConnectId:", connectId)
-		return nil
-	}
-	client, ok := context.(*ConnectContext)
-	if !ok {
-		logger.Error("Invalid ConnectContext type for ConnectId:", connectId)
-		return nil
-	}
-	return client
-
-}
-
-func (t *TcpServer) checkTimeouts() {
-	ticker := time.NewTicker(1 * time.Minute)
-	defer ticker.Stop()
-
-	for range ticker.C {
-		t.clients.Range(func(key, value interface{}) bool {
-			client := value.(*ConnectContext)
-			if time.Since(client.lastActive) > t.IdleTimeout {
-				logger.Debug("ConnectContext timed out:", client.Conn.RemoteAddr())
-				client.Running = false
-				client.Conn.Close()
-				t.clients.Delete(key)
-				if t.SessionHandler != nil {
-					t.SessionHandler.OnIdleTimeout(client)
-				}
-			}
-			return true
-		})
-	}
-}
-
-func (t *TcpServer) CloseContext(connectContext *ConnectContext) {
-	connectContext.Running = false
-	connectContext.Conn.Close()
-	t.clients.Delete(connectContext.ConnectId.String())
-	if t.SessionHandler != nil {
-		t.SessionHandler.OnClose(connectContext)
-	}
-}
-
-func handleConnection(conn net.Conn, t *TcpServer) {
-	defer func() {
-		if r := recover(); r != nil {
-			logger.Error("Recovered from panic:", r)
+	if v, ok := t.clients.Load(connectId); ok {
+		if cc, ok2 := v.(*ConnectContext); ok2 {
+			return cc
 		}
-		_ = conn.Close()
-	}()
+	}
+	return nil
+}
+
+func handleConnection(ctx context.Context, conn net.Conn, t *TcpServer) {
+	// TCP 优化
+	if tcp, ok := conn.(*net.TCPConn); ok {
+		_ = tcp.SetNoDelay(true)
+		_ = tcp.SetKeepAlive(true)
+		_ = tcp.SetKeepAlivePeriod(30 * time.Second)
+	}
 
 	client := &ConnectContext{
 		Conn:                  conn,
 		ConnectId:             uuid.New(),
 		Running:               true,
 		lastActive:            time.Now(),
-		Encoder:               t.Encoder,
 		PacketHandler:         t.SocketHandlerPacket,
 		MessageRouter:         t.Router,
 		Session:               make(map[string]interface{}),
 		ConnectIdentifyParser: t.ConnectIdentifyParser,
+		BufPool:               t.BufPool,
+		ServerFramer:          t.Framer,
 	}
 	t.clients.Store(client.ConnectId.String(), client)
 	logger.Debug("New client connected:", conn.RemoteAddr(), ", ConnectId:", client.ConnectId)
+
 	if t.SessionHandler != nil {
 		t.SessionHandler.OnAccept(client)
 	}
 
-	defer func() {
-		t.CloseContext(client)
+	defer t.CloseContext(client)
 
-	}()
+	for client.Running && atomic.LoadInt32(&t.running) == 1 {
+		// 用 ReadDeadline 控 idle，避免 ticker + 数据竞争
+		if t.IdleTimeout > 0 {
+			_ = conn.SetReadDeadline(time.Now().Add(t.IdleTimeout))
+		} else {
+			_ = conn.SetReadDeadline(time.Time{})
+		}
 
-	for client.Running {
-		array, done := t.SocketHandlerPacket.HandlePacket(conn)
-		if !done {
+		// 读取一帧（body = 业务头6B + payload）
+		array, ok := t.SocketHandlerPacket.HandlePacket(conn, t.BufPool)
+		if !ok {
 			logger.Debug("Connection lost, stopping client:", client.ConnectId)
-			client.Running = false
+			return
+		}
+		client.lastActive = time.Now()
+
+		dataMessage := t.Decoder.Decode(t.BufPool, array)
+
+		t.BufPool.Put(array)
+
+		// 健壮性：解码失败直接断开
+		if dataMessage == nil || dataMessage.Header == nil {
+			logger.Error("Decode failed; closing client:", client.ConnectId)
 			return
 		}
 
-		client.lastActive = time.Now()
-
-		dataMessage := t.Decoder.Decode(array)
 		logger.Debug("Received data message, header:", dataMessage.Header, ", length:", len(dataMessage.Msg))
 		client.Execute(dataMessage)
-
 	}
+}
+
+func (t *TcpServer) CloseContext(connectContext *ConnectContext) {
+	if connectContext == nil {
+		return
+	}
+	// 幂等：只有第一次删除成功才继续收尾
+	if _, loaded := t.clients.LoadAndDelete(connectContext.ConnectId.String()); !loaded {
+		return
+	}
+
+	connectContext.Running = false
+	_ = connectContext.Conn.Close()
+
+	if t.SessionHandler != nil {
+		t.SessionHandler.OnClose(connectContext)
+	}
+	logger.Debug("ConnectContext closed:", connectContext.ConnectId)
 }
 
 func printMessageHandler() {
@@ -203,12 +219,13 @@ func printMessageHandler() {
 func (c *ConnectContext) Execute(message *DataMessage) {
 	defer func() {
 		if r := recover(); r != nil {
-			buf := make([]byte, 1024)
+			buf := make([]byte, 2048)
 			n := runtime.Stack(buf, false)
 			logger.Error("ConnectContext error recovered:", r)
 			logger.Error("Stack trace:", string(buf[:n]))
 		}
 	}()
+
 	var identify interface{}
 	if c.ConnectIdentifyParser != nil {
 		id, err := c.ConnectIdentifyParser.ParseConnectIdentify(c)
@@ -222,17 +239,14 @@ func (c *ConnectContext) Execute(message *DataMessage) {
 }
 
 func (c *ConnectContext) SendMessage(msg *DataMessage) {
-	var id = c.ConnectId
-	encode := c.Encoder.Encode(msg)
-	packet, err := c.PacketHandler.ToPacket(encode)
+	// 建议给写入设置一个合理超时（可做成配置）
+	_ = c.Conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+	defer c.Conn.SetWriteDeadline(time.Time{})
+
+	n, err := c.ServerFramer.WriteFrame(c.Conn, msg) // 统一走 writev
 	if err != nil {
-		logger.Error("Error marshalling message:", err)
+		logger.Error("Send error:", err, ", bytes:", n)
 		return
 	}
-	_, err1 := c.Conn.Write(packet)
-	logger.Debug("Send data to client:", id, ",len:", len(packet), ", header:", msg.Header.ToString())
-	if err1 != nil {
-		logger.Error("Error sending data:", err1)
-	}
-
+	logger.Debug("Send to:", c.ConnectId, ", bytes:", n, ", header:", msg.Header.ToString())
 }

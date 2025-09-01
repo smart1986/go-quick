@@ -26,7 +26,6 @@ func TestServer(tt *testing.T) {
 
 	tcpNet := network.TcpServer{
 		SocketHandlerPacket: &network.DefaultHandlerPacket{},
-		Encoder:             &network.DefaultEncoder{},
 		Decoder:             &network.DefaultDecoder{},
 		Router:              &network.MessageRouter{},
 		IdleTimeout:         1 * time.Minute,
