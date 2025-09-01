@@ -179,8 +179,6 @@ func handleConnection(ctx context.Context, conn net.Conn, t *TcpServer) {
 
 		dataMessage := t.Decoder.Decode(t.BufPool, array)
 
-		t.BufPool.Put(array)
-
 		// 健壮性：解码失败直接断开
 		if dataMessage == nil || dataMessage.Header == nil {
 			logger.Error("Decode failed; closing client:", client.ConnectId)
@@ -189,6 +187,7 @@ func handleConnection(ctx context.Context, conn net.Conn, t *TcpServer) {
 
 		logger.Debug("Received data message, header:", dataMessage.Header, ", length:", len(dataMessage.Msg))
 		client.Execute(dataMessage)
+		t.BufPool.Put(array)
 	}
 }
 
@@ -240,7 +239,7 @@ func (c *ConnectContext) Execute(message *DataMessage) {
 
 func (c *ConnectContext) SendMessage(msg *DataMessage) {
 	// 建议给写入设置一个合理超时（可做成配置）
-	_ = c.Conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+	_ = c.Conn.SetWriteDeadline(time.Now().Add(30 * time.Second))
 	defer c.Conn.SetWriteDeadline(time.Time{})
 
 	n, err := c.ServerFramer.WriteFrame(c.Conn, msg) // 统一走 writev

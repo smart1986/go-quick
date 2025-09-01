@@ -14,7 +14,6 @@ type (
 	DefaultPacketHandler struct{}
 	IHandlerPacket       interface {
 		HandlePacket(conn net.Conn, bufPool *BufPool) ([]byte, bool)
-		ToPacket(data []byte, bufPool *BufPool) ([]byte, error)
 	}
 	IDecode interface {
 		Decode(pool *BufPool, array []byte) *DataMessage
@@ -52,23 +51,9 @@ func (dm *DefaultHandlerPacket) HandlePacket(conn net.Conn, bufPool *BufPool) ([
 		bufPool.Put(body)
 		return nil, false
 	}
+	bufPool.Put(body)
 
 	return body, true // ⚠️ 调用方负责 bufPool.Put(body)
-}
-
-func (dm *DefaultHandlerPacket) ToPacket(data []byte, bufPool *BufPool) ([]byte, error) {
-	total := 4 + len(data)
-
-	var pkt []byte
-	if total <= MaxPacketSize {
-		pkt = bufPool.Get(total)
-	} else {
-		pkt = make([]byte, total) // 超出限制，单独分配
-	}
-
-	binary.BigEndian.PutUint32(pkt[:4], uint32(total))
-	copy(pkt[4:], data)
-	return pkt, nil
 }
 
 func (dm *DefaultDecoder) Decode(pool *BufPool, array []byte) *DataMessage {
