@@ -35,7 +35,7 @@ func TestServer(tt *testing.T) {
 	t := &TestServerHandler{}
 	network.RegisterMessageHandler(t, false)
 
-	tcpNet.Start(config.GlobalConfig)
+	tcpNet.Start(config.GlobalConfig.Server.Addr)
 
 	system.WaitElegantExit()
 }
@@ -45,7 +45,7 @@ type (
 	TestSessionHandler struct{}
 )
 
-func (receiver *TestServerHandler) Execute(connectIdentify interface{}, c *network.ConnectContext, dataMessage *network.DataMessage) *network.DataMessage {
+func (receiver *TestServerHandler) Execute(connectIdentify interface{}, c network.IConnectContext, dataMessage *network.DataMessage) *network.DataMessage {
 	logger.Info("Received message:", dataMessage)
 	c.SendMessage(dataMessage)
 	return nil
@@ -54,12 +54,12 @@ func (receiver *TestServerHandler) MsgId() int32 {
 	return 1
 }
 
-func (receiver *TestSessionHandler) OnAccept(context *network.ConnectContext) {
-	logger.Info("New connection accepted:", context.ConnectId)
+func (receiver *TestSessionHandler) OnAccept(context network.IConnectContext) {
+	logger.Info("New connection accepted:", context.GetConnectId())
 }
-func (receiver *TestSessionHandler) OnClose(context *network.ConnectContext) {
-	logger.Info("Connection closed:", context.ConnectId)
+func (receiver *TestSessionHandler) OnClose(context network.IConnectContext) {
+	logger.Info("Connection closed:", context.GetConnectId())
 }
-func (receiver *TestSessionHandler) OnIdleTimeout(context *network.ConnectContext) {
-	logger.Info("Connection idle timeout:", context.ConnectId)
+func (receiver *TestSessionHandler) OnIdleTimeout(context network.IConnectContext) {
+	logger.Info("Connection idle timeout:", context.GetConnectId())
 }
