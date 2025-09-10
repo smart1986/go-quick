@@ -13,7 +13,7 @@ type (
 	DefaultDecoder       struct{}
 	DefaultPacketHandler struct{}
 	IHandlerPacket       interface {
-		HandlePacket(conn net.Conn, bufPool *BufPool) ([]byte, bool)
+		HandlePacket(conn net.Conn, bufPool *BufPool) ([]byte, bool, error)
 	}
 	IDecode interface {
 		Decode(pool *BufPool, array []byte) *DataMessage
@@ -24,17 +24,17 @@ const MaxPacketSize = 4 * 1024
 
 // HandlePacket 读取并返回数据包，直接返回 bufPool 的内存
 // 调用方必须在处理完成后调用 bufPool.Put(body)
-func (dm *DefaultHandlerPacket) HandlePacket(conn net.Conn, bufPool *BufPool) ([]byte, bool) {
+func (dm *DefaultHandlerPacket) HandlePacket(conn net.Conn, bufPool *BufPool) ([]byte, bool, error) {
 	header := make([]byte, 4)
 	if _, err := io.ReadFull(conn, header); err != nil {
 		logger.Debug("ConnectContext disconnected:", conn.RemoteAddr(), err)
-		return nil, false
+		return nil, false, err
 	}
 
 	length := binary.BigEndian.Uint32(header)
 	if length < 4 || length > MaxPacketSize {
 		logger.Error("Invalid length:", length)
-		return nil, false
+		return nil, false, io.ErrUnexpectedEOF
 	}
 
 	bodyLength := int(length - 4)
@@ -49,11 +49,11 @@ func (dm *DefaultHandlerPacket) HandlePacket(conn net.Conn, bufPool *BufPool) ([
 	if _, err := io.ReadFull(conn, body); err != nil {
 		logger.Debug("ConnectContext disconnected:", conn.RemoteAddr(), err)
 		bufPool.Put(body)
-		return nil, false
+		return nil, false, err
 	}
 	bufPool.Put(body)
 
-	return body, true // ⚠️ 调用方负责 bufPool.Put(body)
+	return body, true, nil // ⚠️ 调用方负责 bufPool.Put(body)
 }
 
 func (dm *DefaultDecoder) Decode(pool *BufPool, array []byte) *DataMessage {

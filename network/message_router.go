@@ -8,15 +8,15 @@ var MessageHandler = make(map[int32]*ExecutorWrapper)
 
 type (
 	Router interface {
-		Route(connectIdentify interface{}, c *ConnectContext, dataMessage *DataMessage)
+		Route(connectIdentify interface{}, c IConnectContext, dataMessage *DataMessage)
 	}
 
 	MessageExecutor interface {
-		Execute(connectIdentify interface{}, c *ConnectContext, dataMessage *DataMessage) *DataMessage
+		Execute(connectIdentify interface{}, c IConnectContext, dataMessage *DataMessage) *DataMessage
 		MsgId() int32
 	}
 	IConnectIdentifyParser interface {
-		ParseConnectIdentify(c *ConnectContext) (interface{}, error)
+		ParseConnectIdentify(c IConnectContext) (interface{}, error)
 	}
 
 	MessageRouter struct {
@@ -46,7 +46,7 @@ func RegisterMessageHandler(handler MessageExecutor, checkLogin bool) {
 	MessageHandler[msgId] = executorWrapper
 }
 
-func (r *MessageRouter) Route(connectIdentify interface{}, c *ConnectContext, dataMessage *DataMessage) {
+func (r *MessageRouter) Route(connectIdentify interface{}, c IConnectContext, dataMessage *DataMessage) {
 	header := dataMessage.Header.(IDataHeader)
 	if handler, existsHandler := MessageHandler[header.GetMsgId()]; existsHandler {
 		if handler.CheckLogin {

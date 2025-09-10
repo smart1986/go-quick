@@ -119,7 +119,7 @@ func (c *Connector) readLoop() {
 		}
 
 		// 读取完整帧（不含4字节长度；由 IHandlerPacket 定义）
-		array, ok := c.Marshal.HandlePacket(conn, c.bufPool)
+		array, ok, _ := c.Marshal.HandlePacket(conn, c.bufPool)
 		if !ok {
 			logger.Debug("Connection lost; will reconnect…")
 			_ = conn.Close()

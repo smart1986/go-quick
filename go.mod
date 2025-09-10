@@ -3,6 +3,7 @@ module github.com/smart1986/go-quick
 go 1.23.1
 
 require (
+	github.com/coder/websocket v1.8.14
 	github.com/gin-gonic/gin v1.10.0
 	github.com/google/uuid v1.3.1
 	github.com/panjf2000/ants/v2 v2.11.2

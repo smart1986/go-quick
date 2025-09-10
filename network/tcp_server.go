@@ -2,8 +2,8 @@ package network
 
 import (
 	"context"
+	"errors"
 	"github.com/google/uuid"
-	"github.com/smart1986/go-quick/config"
 	"github.com/smart1986/go-quick/logger"
 	"github.com/smart1986/go-quick/system"
 	"net"
@@ -46,13 +46,13 @@ type (
 	}
 
 	ISessionHandler interface {
-		OnAccept(context *ConnectContext)
-		OnClose(context *ConnectContext)
-		OnIdleTimeout(context *ConnectContext)
+		OnAccept(context IConnectContext)
+		OnClose(context IConnectContext)
+		OnIdleTimeout(context IConnectContext)
 	}
 )
 
-func (t *TcpServer) Start(c *config.Config) {
+func (t *TcpServer) Start(addr string) {
 	if t.SocketHandlerPacket == nil {
 		panic("SocketHandlerPacket must be provided")
 	}
@@ -71,7 +71,7 @@ func (t *TcpServer) Start(c *config.Config) {
 
 	printMessageHandler()
 
-	ln, err := net.Listen("tcp", c.Server.Addr)
+	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		logger.Error("Error starting TCP server:", err)
 		return
@@ -81,7 +81,7 @@ func (t *TcpServer) Start(c *config.Config) {
 	atomic.StoreInt32(&t.running, 1)
 	t.clients = sync.Map{}
 
-	logger.Info("Server started on:", c.Server.Addr)
+	logger.Info("Server started on:", addr)
 	system.RegisterExitHandler(t)
 
 	go func() {
@@ -120,7 +120,7 @@ func (t *TcpServer) OnSystemExit() {
 	logger.Info("TcpServer released")
 }
 
-func (t *TcpServer) GetConnectContext(connectId string) *ConnectContext {
+func (t *TcpServer) GetConnectContext(connectId string) IConnectContext {
 	if connectId == "" {
 		return nil
 	}
@@ -132,7 +132,7 @@ func (t *TcpServer) GetConnectContext(connectId string) *ConnectContext {
 	return nil
 }
 
-func handleConnection(ctx context.Context, conn net.Conn, t *TcpServer) {
+func handleConnection(_ context.Context, conn net.Conn, t *TcpServer) {
 	// TCP 优化
 	if tcp, ok := conn.(*net.TCPConn); ok {
 		_ = tcp.SetNoDelay(true)
@@ -170,14 +170,21 @@ func handleConnection(ctx context.Context, conn net.Conn, t *TcpServer) {
 		}
 
 		// 读取一帧（body = 业务头6B + payload）
-		array, ok := t.SocketHandlerPacket.HandlePacket(conn, t.BufPool)
+		array, ok, err := t.SocketHandlerPacket.HandlePacket(conn, t.BufPool)
 		if !ok {
+			var ne net.Error
+			if errors.As(err, &ne) && ne.Timeout() {
+				if t.SessionHandler != nil {
+					t.SessionHandler.OnIdleTimeout(client)
+				}
+			}
 			logger.Debug("Connection lost, stopping client:", client.ConnectId)
 			return
 		}
 		client.lastActive = time.Now()
 
 		dataMessage := t.Decoder.Decode(t.BufPool, array)
+		t.BufPool.Put(array) // 归还读取 buffer
 
 		// 健壮性：解码失败直接断开
 		if dataMessage == nil || dataMessage.Header == nil {
@@ -187,26 +194,30 @@ func handleConnection(ctx context.Context, conn net.Conn, t *TcpServer) {
 
 		logger.Debug("Received data message, header:", dataMessage.Header, ", length:", len(dataMessage.Msg))
 		client.Execute(dataMessage)
-		t.BufPool.Put(array)
+		t.BufPool.Put(dataMessage.Msg) // 归还业务 buffer
 	}
 }
 
-func (t *TcpServer) CloseContext(connectContext *ConnectContext) {
+func (t *TcpServer) CloseContext(connectContext IConnectContext) {
 	if connectContext == nil {
 		return
 	}
 	// 幂等：只有第一次删除成功才继续收尾
-	if _, loaded := t.clients.LoadAndDelete(connectContext.ConnectId.String()); !loaded {
+	if _, loaded := t.clients.LoadAndDelete(connectContext.GetConnectId()); !loaded {
+		return
+	}
+	client, ok := connectContext.(*ConnectContext)
+	if !ok {
 		return
 	}
 
-	connectContext.Running = false
-	_ = connectContext.Conn.Close()
+	client.Running = false
+	_ = client.Conn.Close()
 
 	if t.SessionHandler != nil {
 		t.SessionHandler.OnClose(connectContext)
 	}
-	logger.Debug("ConnectContext closed:", connectContext.ConnectId)
+	logger.Debug("ConnectContext closed:", connectContext.GetConnectId())
 }
 
 func printMessageHandler() {
@@ -248,4 +259,19 @@ func (c *ConnectContext) SendMessage(msg *DataMessage) {
 		return
 	}
 	logger.Debug("Send to:", c.ConnectId, ", bytes:", n, ", header:", msg.Header.ToString())
+}
+
+func (c *ConnectContext) WriteSession(key string, value interface{}) {
+	c.Session[key] = value
+}
+
+func (c *ConnectContext) GetSession(key string) interface{} {
+	return c.Session[key]
+}
+func (c *ConnectContext) DeleteSession(key string) {
+	delete(c.Session, key)
+}
+
+func (c *ConnectContext) GetConnectId() string {
+	return c.ConnectId.String()
 }
