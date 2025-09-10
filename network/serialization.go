@@ -51,8 +51,6 @@ func (dm *DefaultHandlerPacket) HandlePacket(conn net.Conn, bufPool *BufPool) ([
 		bufPool.Put(body)
 		return nil, false, err
 	}
-	bufPool.Put(body)
-
 	return body, true, nil // ⚠️ 调用方负责 bufPool.Put(body)
 }
 
