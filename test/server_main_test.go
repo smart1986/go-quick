@@ -25,11 +25,8 @@ func TestServer(tt *testing.T) {
 	//}
 
 	tcpNet := network.TcpServer{
-		SocketHandlerPacket: &network.DefaultHandlerPacket{},
-		Decoder:             &network.DefaultDecoder{},
-		Router:              &network.MessageRouter{},
-		IdleTimeout:         1 * time.Minute,
-		SessionHandler:      &TestSessionHandler{},
+		IdleTimeout:    1 * time.Minute,
+		SessionHandler: &TestSessionHandler{},
 	}
 
 	t := &TestServerHandler{}

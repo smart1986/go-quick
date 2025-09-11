@@ -22,8 +22,8 @@ type Connector struct {
 	running        int32 // 原子控制
 	reconnecting   int32 // 原子标记：是否处于重连中
 	mu             sync.RWMutex
+	writeMu        sync.Mutex
 	MessageHandler func(*DataMessage)
-	Marshal        IHandlerPacket
 	Decoder        IDecode
 	bufPool        *BufPool
 	Framer         IFramer
@@ -35,13 +35,10 @@ type Connector struct {
 }
 
 // NewConnector 要求：serverAddr、marshal、decoder、framer、messageHandler 必须提供
-func NewConnector(serverAddr string, marshal IHandlerPacket, decoder IDecode, framer IFramer, messageHandler func(message *DataMessage)) *Connector {
+func NewConnector(serverAddr string, decoder IDecode, framer IFramer, messageHandler func(message *DataMessage)) *Connector {
 	switch {
 	case serverAddr == "":
 		logger.Error("NewConnector: serverAddr required")
-		return nil
-	case marshal == nil:
-		logger.Error("NewConnector: marshal(IHandlerPacket) required")
 		return nil
 	case decoder == nil:
 		logger.Error("NewConnector: decoder(IDecode) required")
@@ -55,7 +52,6 @@ func NewConnector(serverAddr string, marshal IHandlerPacket, decoder IDecode, fr
 	}
 	c := &Connector{
 		ServerAddr:     serverAddr,
-		Marshal:        marshal,
 		Decoder:        decoder,
 		Framer:         framer,
 		MessageHandler: messageHandler,
@@ -68,26 +64,41 @@ func NewConnector(serverAddr string, marshal IHandlerPacket, decoder IDecode, fr
 	return c
 }
 
-func (c *Connector) Connect() error {
+// 仅负责拨号建连并设置 TCP 选项，不启动 readLoop
+func (c *Connector) dialOnce(ctx context.Context) (net.Conn, error) {
 	if atomic.LoadInt32(&c.running) == 0 {
-		return errors.New("connector is not running")
+		return nil, errors.New("connector is not running")
 	}
 	dialer := &net.Dialer{Timeout: c.DialTimeout, KeepAlive: 30 * time.Second}
-	conn, err := dialer.Dial("tcp", c.ServerAddr)
+	conn, err := dialer.DialContext(ctx, "tcp", c.ServerAddr)
 	if err != nil {
-		return fmt.Errorf("connect %s failed: %w", c.ServerAddr, err)
+		return nil, fmt.Errorf("connect %s failed: %w", c.ServerAddr, err)
 	}
 	if tcp, ok := conn.(*net.TCPConn); ok {
 		_ = tcp.SetNoDelay(true)
 		_ = tcp.SetKeepAlive(true)
 		_ = tcp.SetKeepAlivePeriod(30 * time.Second)
 	}
+	return conn, nil
+}
+
+func (c *Connector) Connect() error {
+	if atomic.LoadInt32(&c.running) == 0 {
+		return errors.New("connector is not running")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), c.DialTimeout)
+	defer cancel()
+
+	conn, err := c.dialOnce(ctx)
+	if err != nil {
+		return err
+	}
 	c.mu.Lock()
 	c.Conn = conn
 	c.mu.Unlock()
 	logger.Info("Connected to server:", c.ServerAddr)
 
-	go c.readLoop() // 独立读循环
+	go c.readLoop() // 仅首次连接后启动读循环
 	return nil
 }
 
@@ -99,12 +110,13 @@ func (c *Connector) readLoop() {
 	}()
 
 	for atomic.LoadInt32(&c.running) == 1 {
-		// 读超时作为 idle 控制，避免永久阻塞
+		// 获取当前连接
 		c.mu.RLock()
 		conn := c.Conn
 		c.mu.RUnlock()
+
 		if conn == nil {
-			// 尚未建立或已断开，尝试重连
+			// 尚未建立或已断开，尝试重连（只拨号，不再起新的 readLoop）
 			if err := c.reconnectWithBackoff(context.Background()); err != nil {
 				logger.Error("Reconnect failed:", err)
 				return
@@ -112,15 +124,21 @@ func (c *Connector) readLoop() {
 			continue
 		}
 
+		// 读超时作为 idle 控制，避免永久阻塞
 		if c.IdleTimeout > 0 {
 			_ = conn.SetReadDeadline(time.Now().Add(c.IdleTimeout))
 		} else {
 			_ = conn.SetReadDeadline(time.Time{})
 		}
 
-		// 读取完整帧（不含4字节长度；由 IHandlerPacket 定义）
-		array, ok, _ := c.Marshal.HandlePacket(conn, c.bufPool)
+		// 读取完整帧（是否含4字节长度由 IHandlerPacket 定义）
+		array, ok, herr := c.Framer.DeFrame(conn, c.bufPool)
+		if herr != nil {
+			// 区分超时/协议错误/对端关闭（这里统一记日志；如需细分可判断 net.Error）
+			logger.Debug("HandlePacket error:", herr)
+		}
 		if !ok {
+			// 连接不可用：关闭当前连接并置空，然后重连
 			logger.Debug("Connection lost; will reconnect…")
 			_ = conn.Close()
 			c.mu.Lock()
@@ -128,7 +146,7 @@ func (c *Connector) readLoop() {
 				c.Conn = nil
 			}
 			c.mu.Unlock()
-			// 进入重连
+
 			if err := c.reconnectWithBackoff(context.Background()); err != nil {
 				logger.Error("Reconnect failed:", err)
 				return
@@ -139,23 +157,31 @@ func (c *Connector) readLoop() {
 		// 正常收到数据，解码
 		msg := c.Decoder.Decode(c.bufPool, array)
 		if msg == nil {
-			logger.Error("Decoder returned nil; closing")
+			logger.Error("Decoder returned nil; closing current connection")
 			_ = conn.Close()
 			c.mu.Lock()
 			if c.Conn == conn {
 				c.Conn = nil
 			}
 			c.mu.Unlock()
+
+			// 尝试重连
+			if err := c.reconnectWithBackoff(context.Background()); err != nil {
+				logger.Error("Reconnect failed:", err)
+				return
+			}
 			continue
 		}
+
 		if c.MessageHandler != nil {
 			c.MessageHandler(msg)
 		}
-		c.bufPool.Put(array) // 半限制策略：小包回收，大包丢弃
+		// 假设 HandlePacket 返回的 array 来自 bufPool，这里回收
+		c.bufPool.Put(array)
 	}
 }
 
-// 指数退避+抖动重连；成功后启动新的 readLoop（由 Connect 内部完成）
+// 指数退避+抖动重连；成功后仅替换连接，由现有 readLoop 继续读取
 func (c *Connector) reconnectWithBackoff(ctx context.Context) error {
 	if atomic.LoadInt32(&c.running) == 0 {
 		return errors.New("not running")
@@ -179,24 +205,40 @@ func (c *Connector) reconnectWithBackoff(ctx context.Context) error {
 		maxDelay      = 5 * time.Second
 		jitterPercent = 0.2 // ±20%
 	)
+
 	var lastErr error
 	for attempt := 0; attempt < maxAttempts && atomic.LoadInt32(&c.running) == 1; attempt++ {
-		if err := c.Connect(); err == nil {
+		dctx, cancel := context.WithTimeout(ctx, c.DialTimeout)
+		newConn, err := c.dialOnce(dctx)
+		cancel()
+
+		if err == nil {
+			// 成功：替换连接；旧连接若仍存活，readLoop 上一轮会关闭它
+			c.mu.Lock()
+			// 保险起见，关闭旧 conn（如果还在）
+			old := c.Conn
+			c.Conn = newConn
+			c.mu.Unlock()
+
+			if old != nil && old != newConn {
+				_ = old.Close()
+			}
+			logger.Info("Reconnected to server:", c.ServerAddr)
 			return nil
-		} else {
-			lastErr = err
-			// 退避 + 抖动
-			backoff := time.Duration(float64(baseDelay) * math.Pow(2, float64(attempt)))
-			if backoff > maxDelay {
-				backoff = maxDelay
-			}
-			j := jitter(backoff, jitterPercent)
-			logger.Debug("Reconnect in", j)
-			select {
-			case <-time.After(j):
-			case <-ctx.Done():
-				return ctx.Err()
-			}
+		}
+
+		lastErr = err
+		// 退避 + 抖动
+		backoff := time.Duration(float64(baseDelay) * math.Pow(2, float64(attempt)))
+		if backoff > maxDelay {
+			backoff = maxDelay
+		}
+		j := jitter(backoff, jitterPercent)
+		logger.Debug("Reconnect in", j, "err:", err)
+		select {
+		case <-time.After(j):
+		case <-ctx.Done():
+			return ctx.Err()
 		}
 	}
 	if lastErr == nil {
@@ -224,7 +266,11 @@ func (c *Connector) SendMessage(msg *DataMessage) error {
 	}
 	defer conn.SetWriteDeadline(time.Time{})
 
+	// 避免多 goroutine 并发写导致帧交叠
+	c.writeMu.Lock()
 	n, err := c.Framer.WriteFrame(conn, msg)
+	c.writeMu.Unlock()
+
 	if err != nil {
 		logger.Error("Send error:", err, ", bytes:", n)
 		return err
@@ -237,6 +283,7 @@ func (c *Connector) Close() {
 		return
 	}
 	atomic.StoreInt32(&c.reconnecting, 0)
+
 	c.mu.Lock()
 	if c.Conn != nil {
 		_ = c.Conn.Close()

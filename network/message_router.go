@@ -15,9 +15,6 @@ type (
 		Execute(connectIdentify interface{}, c IConnectContext, dataMessage *DataMessage) *DataMessage
 		MsgId() int32
 	}
-	IConnectIdentifyParser interface {
-		ParseConnectIdentify(c IConnectContext) (interface{}, error)
-	}
 
 	MessageRouter struct {
 	}

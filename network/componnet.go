@@ -9,4 +9,14 @@ type (
 		DeleteSession(key string)
 		GetConnectId() string
 	}
+
+	ISessionHandler interface {
+		OnAccept(context IConnectContext)
+		OnClose(context IConnectContext)
+		OnIdleTimeout(context IConnectContext)
+	}
+
+	IConnectIdentifyParser interface {
+		ParseConnectIdentify(c IConnectContext) (interface{}, error)
+	}
 )

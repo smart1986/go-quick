@@ -21,7 +21,6 @@ type (
 		cancel  context.CancelFunc
 		ln      net.Listener
 
-		SocketHandlerPacket   IHandlerPacket
 		Decoder               IDecode
 		Framer                IFramer
 		Router                Router
@@ -37,30 +36,22 @@ type (
 		lastActive            time.Time
 		Conn                  net.Conn
 		Running               bool
-		PacketHandler         IHandlerPacket
 		MessageRouter         Router
 		ConnectIdentifyParser IConnectIdentifyParser
 		Session               map[string]interface{}
 		BufPool               *BufPool
 		ServerFramer          IFramer
-	}
-
-	ISessionHandler interface {
-		OnAccept(context IConnectContext)
-		OnClose(context IConnectContext)
-		OnIdleTimeout(context IConnectContext)
+		writeMu               sync.Mutex
+		sessionMu             sync.RWMutex
 	}
 )
 
 func (t *TcpServer) Start(addr string) {
-	if t.SocketHandlerPacket == nil {
-		panic("SocketHandlerPacket must be provided")
-	}
 	if t.Decoder == nil {
-		panic("Decoder must be provided")
+		t.Decoder = &DefaultDecoder{}
 	}
 	if t.Router == nil {
-		panic("Router must be provided")
+		t.Router = &MessageRouter{}
 	}
 	if t.Framer == nil {
 		t.Framer = &DefaultFramer{}
@@ -145,7 +136,6 @@ func handleConnection(_ context.Context, conn net.Conn, t *TcpServer) {
 		ConnectId:             uuid.New(),
 		Running:               true,
 		lastActive:            time.Now(),
-		PacketHandler:         t.SocketHandlerPacket,
 		MessageRouter:         t.Router,
 		Session:               make(map[string]interface{}),
 		ConnectIdentifyParser: t.ConnectIdentifyParser,
@@ -170,7 +160,7 @@ func handleConnection(_ context.Context, conn net.Conn, t *TcpServer) {
 		}
 
 		// 读取一帧（body = 业务头6B + payload）
-		array, ok, err := t.SocketHandlerPacket.HandlePacket(conn, t.BufPool)
+		array, ok, err := t.Framer.DeFrame(conn, t.BufPool)
 		if !ok {
 			var ne net.Error
 			if errors.As(err, &ne) && ne.Timeout() {
@@ -249,11 +239,13 @@ func (c *ConnectContext) Execute(message *DataMessage) {
 }
 
 func (c *ConnectContext) SendMessage(msg *DataMessage) {
-	// 建议给写入设置一个合理超时（可做成配置）
 	_ = c.Conn.SetWriteDeadline(time.Now().Add(30 * time.Second))
 	defer c.Conn.SetWriteDeadline(time.Time{})
 
-	n, err := c.ServerFramer.WriteFrame(c.Conn, msg) // 统一走 writev
+	c.writeMu.Lock()
+	n, err := c.ServerFramer.WriteFrame(c.Conn, msg)
+	c.writeMu.Unlock()
+
 	if err != nil {
 		logger.Error("Send error:", err, ", bytes:", n)
 		return
@@ -262,14 +254,20 @@ func (c *ConnectContext) SendMessage(msg *DataMessage) {
 }
 
 func (c *ConnectContext) WriteSession(key string, value interface{}) {
+	c.sessionMu.Lock()
 	c.Session[key] = value
+	c.sessionMu.Unlock()
 }
-
 func (c *ConnectContext) GetSession(key string) interface{} {
-	return c.Session[key]
+	c.sessionMu.RLock()
+	v := c.Session[key]
+	c.sessionMu.RUnlock()
+	return v
 }
 func (c *ConnectContext) DeleteSession(key string) {
+	c.sessionMu.Lock()
 	delete(c.Session, key)
+	c.sessionMu.Unlock()
 }
 
 func (c *ConnectContext) GetConnectId() string {

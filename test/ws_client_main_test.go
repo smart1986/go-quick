@@ -8,11 +8,11 @@ import (
 	"testing"
 )
 
-func TestClient(t *testing.T) {
+func TestWSClient(t *testing.T) {
 	config.InitConfig("./config.yml", &config.Config{})
 	logger.NewLogger(config.GlobalConfig)
-	serverAddr := "127.0.0.1:8888"
-	connector := network.NewConnector(serverAddr, &network.DefaultDecoder{}, &network.DefaultFramer{}, test)
+	serverAddr := "ws://127.0.0.1:8888/ws"
+	connector := network.NewWSConnector(serverAddr, &network.DefaultDecoder{}, test)
 	err := connector.Connect()
 	if err != nil {
 		panic(err)
@@ -30,10 +30,4 @@ func TestClient(t *testing.T) {
 	system.WaitElegantExit(func() {
 		connector.Close()
 	})
-}
-
-func test(message *network.DataMessage) {
-	logger.Info("Received message:", message)
-	logger.Info("Received message content:", string(message.Msg))
-
 }
