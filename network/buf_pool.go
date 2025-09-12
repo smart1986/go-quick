@@ -39,6 +39,22 @@ func NewBufPool() *BufPool {
 	return bp
 }
 
+func NewBufPoolWithSizes(sizes []int) *BufPool {
+	bp := &BufPool{
+		quit: make(chan struct{}),
+	}
+	for _, size := range sizes {
+		p := &poolWithStats{capacity: size}
+		p.pool.New = func(sz int) func() interface{} {
+			return func() interface{} {
+				return make([]byte, sz)
+			}
+		}(size)
+		bp.pools = append(bp.pools, p)
+	}
+	return bp
+}
+
 // Get 根据请求大小返回合适的 buffer
 func (bp *BufPool) Get(size int) []byte {
 	for _, p := range bp.pools {
