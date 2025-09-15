@@ -182,7 +182,7 @@ func handleConnection(_ context.Context, conn net.Conn, t *TcpServer) {
 			return
 		}
 
-		logger.Debug("Received data message, header:", dataMessage.Header, ", length:", len(dataMessage.Msg))
+		logger.Debug("Received data message, header:", dataMessage.Header, ", length:", len(dataMessage.Msg), ", from:", client.ConnectId)
 		client.Execute(dataMessage)
 		t.BufPool.Put(dataMessage.Msg) // 归还业务 buffer
 	}
