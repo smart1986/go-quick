@@ -2,6 +2,7 @@ package network
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"github.com/coder/websocket"
 	"github.com/google/uuid"
@@ -16,7 +17,7 @@ import (
 type (
 	WSServer struct {
 		OriginPatterns  []string
-		Schema          string // ws 或 wss
+		Schema          string // 路由路径：/ws 或 /wss
 		CertFile        string // 证书文件，wss 必须
 		KeyFile         string // 私钥文件，wss 必须
 		CompressionMode websocket.CompressionMode
@@ -30,7 +31,7 @@ type (
 
 		BufPool *BufPool
 
-		clients sync.Map
+		clients sync.Map // key: connectId string, val: *WSConnectContext
 	}
 
 	WSConnectContext struct {
@@ -53,7 +54,7 @@ func (wsc *WSConnectContext) Execute(msg *DataMessage) {
 		if r := recover(); r != nil {
 			buf := make([]byte, 2048)
 			n := runtime.Stack(buf, false)
-			logger.Error("ConnectContext error recovered:", r)
+			logger.Error("WSConnectContext.Execute recovered:", r)
 			logger.Error("Stack trace:", string(buf[:n]))
 		}
 	}()
@@ -69,17 +70,22 @@ func (wsc *WSConnectContext) Execute(msg *DataMessage) {
 	}
 	wsc.MessageRouter.Route(identify, wsc, msg)
 }
+
+// 发送一条业务帧（帧格式：4B总长 + 6B头 + payload）
+// 失败时立即关闭连接，促使读循环尽快退出
 func (wsc *WSConnectContext) SendMessage(msg *DataMessage) {
 	wctx, wcancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer wcancel()
-	frame := wsc.Framer.CreateFrame(msg)
+
+	frame := wsc.Framer.CreateFrame(msg) // CreateFrame 应该返回完整业务帧（含 4B totalLen）
 	wsc.writeMu.Lock()
 	err := wsc.Conn.Write(wctx, websocket.MessageBinary, frame)
 	wsc.writeMu.Unlock()
 	if err != nil {
 		logger.Error("WSConnectContext: write message error:", err)
+		_ = wsc.Conn.Close(websocket.StatusAbnormalClosure, "write error")
+		wsc.Running = false
 	}
-
 }
 
 func (wsc *WSConnectContext) WriteSession(key string, value interface{}) {
@@ -102,6 +108,7 @@ func (wsc *WSConnectContext) DeleteSession(key string) {
 func (wsc *WSConnectContext) GetConnectId() string {
 	return wsc.ConnectId.String()
 }
+
 func (wss *WSServer) OnSystemExit() {
 	wss.clients.Range(func(key, value interface{}) bool {
 		wss.CloseContext(value.(*WSConnectContext))
@@ -128,6 +135,7 @@ func (wss *WSServer) Start(addr string) {
 	if wss.BufPool == nil {
 		wss.BufPool = NewBufPool()
 	}
+
 	http.HandleFunc(wss.Schema, wss.wsHandler)
 
 	useTLS := wss.Schema == "/wss"
@@ -153,6 +161,15 @@ func (wss *WSServer) Start(addr string) {
 }
 
 func (wss *WSServer) wsHandler(wr http.ResponseWriter, req *http.Request) {
+	defer func() {
+		if r := recover(); r != nil {
+			buf := make([]byte, 2048)
+			n := runtime.Stack(buf, false)
+			logger.Error("wsHandler panic:", r)
+			logger.Error("Stack trace:", string(buf[:n]))
+		}
+	}()
+
 	insecureSkipVerify := wss.OriginPatterns == nil || len(wss.OriginPatterns) == 0
 	conn, err := websocket.Accept(wr, req, &websocket.AcceptOptions{
 		OriginPatterns:     wss.OriginPatterns,
@@ -174,7 +191,6 @@ func (wss *WSServer) wsHandler(wr http.ResponseWriter, req *http.Request) {
 		BufPool:               wss.BufPool,
 		Framer:                wss.Framer,
 	}
-
 	wss.clients.Store(client.ConnectId.String(), client)
 	logger.Debug("New client connected:", req.RemoteAddr, ", ConnectId:", client.ConnectId)
 
@@ -185,6 +201,7 @@ func (wss *WSServer) wsHandler(wr http.ResponseWriter, req *http.Request) {
 	defer wss.CloseContext(client)
 
 	for {
+		// 读：保留你的策略——超时即断开
 		var (
 			ctx    context.Context
 			cancel context.CancelFunc
@@ -197,35 +214,46 @@ func (wss *WSServer) wsHandler(wr http.ResponseWriter, req *http.Request) {
 		msgType, data, err := conn.Read(ctx)
 		cancel()
 		if err != nil {
+			// 保持原策略：超时也断开
 			if wss.SessionHandler != nil {
 				if errors.Is(err, context.DeadlineExceeded) {
 					wss.SessionHandler.OnIdleTimeout(client)
 				}
 			}
-			logger.Debug("Connection lost, stopping client:", client.ConnectId)
+			logger.Debug("WS connection lost, stopping client:", client.ConnectId, ", err:", err)
 			return
 		}
 		if msgType == websocket.MessageText {
 			// 忽略文本消息
-			logger.Warn("ignore text message")
+			logger.Warn("WS ignore text message")
 			continue
 		}
 		if msgType != websocket.MessageBinary {
 			continue
 		}
 
-		dataMessage := wss.Decoder.Decode(wss.BufPool, data)
-
-		// 健壮性：解码失败直接断开
-		if dataMessage == nil || dataMessage.Header == nil {
-			logger.Error("Decode failed; closing client:", client.ConnectId)
+		// === 关键修正：从 data 中按你的业务帧协议解出 0..N 个“6B头+payload”的 body ===
+		bodies, defErr := wsExtractBodies(data)
+		if defErr != nil {
+			logger.Error("WS deframe error:", defErr)
+			_ = conn.Close(websocket.StatusProtocolError, "bad frame")
 			return
 		}
 
-		logger.Debug("Received data message, header:", dataMessage.Header, ", length:", len(dataMessage.Msg))
-		client.Execute(dataMessage)
-		wss.BufPool.Put(dataMessage.Msg)
+		for _, body := range bodies {
+			dataMessage := wss.Decoder.Decode(wss.BufPool, body) // Decode 期望输入为 6B头+payload（不含4B长度）
+			if dataMessage == nil || dataMessage.Header == nil {
+				logger.Error("Decode failed; closing client:", client.ConnectId)
+				return
+			}
 
+			client.lastActive = time.Now()
+			logger.Debug("Received data message, header:", dataMessage.Header, ", length:", len(dataMessage.Msg))
+			client.Execute(dataMessage)
+
+			// 统一通过 Close() 回收 payload（避免重复 Put）
+			dataMessage.Close()
+		}
 	}
 }
 
@@ -247,7 +275,7 @@ func (wss *WSServer) CloseContext(connectCtx IConnectContext) {
 	if wss.SessionHandler != nil {
 		wss.SessionHandler.OnClose(client)
 	}
-	logger.Debug("ConnectContext closed:", client.ConnectId)
+	logger.Debug("WS ConnectContext closed:", client.ConnectId)
 }
 
 func (wss *WSServer) GetConnectContext(connectId string) IConnectContext {
@@ -260,4 +288,31 @@ func (wss *WSServer) GetConnectContext(connectId string) IConnectContext {
 		}
 	}
 	return nil
+}
+
+// ================== 业务帧解包（支持一条 WS 消息中携带多帧） ==================
+//
+// data 布局为  [4B totalLen][6B 业务头][payload] [4B totalLen][6B 业务头][payload] ...
+// 返回的 bodies 每个元素是「6B头 + payload」（不含 4B totalLen）
+func wsExtractBodies(data []byte) ([][]byte, error) {
+	var bodies [][]byte
+	i := 0
+	for i < len(data) {
+		if len(data[i:]) < 10 { // 至少 4B 长度 + 6B 业务头
+			return nil, errors.New("short frame")
+		}
+		total := int(binary.BigEndian.Uint32(data[i : i+4]))
+		if total < 10 {
+			return nil, errors.New("bad total length")
+		}
+		if len(data[i:]) < total {
+			return nil, errors.New("incomplete frame")
+		}
+		// body = 6B头 + payload
+		body := data[i+4 : i+total]
+		// 拷贝出独立切片，避免上层持有原 data 的大块内存
+		bodies = append(bodies, append([]byte(nil), body...))
+		i += total
+	}
+	return bodies, nil
 }

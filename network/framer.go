@@ -2,6 +2,7 @@ package network
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"github.com/smart1986/go-quick/logger"
 	"io"
@@ -16,6 +17,8 @@ type (
 	}
 	DefaultFramer struct{}
 )
+
+var ErrProtocol = errors.New("protocol error")
 
 func (f *DefaultFramer) WriteFrame(conn net.Conn, m *DataMessage) (int64, error) {
 	h, ok := m.Header.(*DataHeader)
@@ -54,29 +57,43 @@ func (f *DefaultFramer) CreateFrame(m *DataMessage) []byte {
 }
 
 func (f *DefaultFramer) DeFrame(conn net.Conn, bufPool *BufPool) ([]byte, bool, error) {
-	header := make([]byte, 4)
-	if _, err := io.ReadFull(conn, header); err != nil {
-		logger.Debug("ConnectContext disconnected:", conn.RemoteAddr(), err)
+	// 栈上 4 字节头，避免每帧分配
+	var header [4]byte
+	if _, err := io.ReadFull(conn, header[:]); err != nil {
+		// 原样把错误上抛：上层可区分 timeout/EOF/closed
 		return nil, false, err
 	}
 
-	length := binary.BigEndian.Uint32(header)
-	if length < 4 || length > MaxPacketSize {
-		logger.Error("Invalid length:", length)
-		return nil, false, io.ErrUnexpectedEOF
+	length := binary.BigEndian.Uint32(header[:]) // 总长（含4字节长度本身）
+	if length < 4 {
+		return nil, false, fmt.Errorf("%w: length<4 (%d)", ErrProtocol, length)
 	}
 
-	bodyLength := int(length - 4)
-	body := bufPool.Get(bodyLength)
-	if cap(body) < bodyLength {
-		bufPool.Put(body) // 原 buffer 不够大，归还
-		body = make([]byte, bodyLength)
+	// 用 uint64 做边界检查，防止 int 溢出；同时限制到 MaxPacketSize
+	bodyLen64 := uint64(length - 4)
+	// 进程可分配的最大 int
+	const maxInt = int(^uint(0) >> 1)
+	if bodyLen64 > uint64(maxInt) || bodyLen64 > uint64(MaxPacketSize) {
+		return nil, false, fmt.Errorf("%w: body too large (%d)", ErrProtocol, bodyLen64)
+	}
+	bodyLen := int(bodyLen64)
+
+	// 从池中取；不足则归还并新建
+	body := bufPool.Get(bodyLen)
+	if cap(body) < bodyLen {
+		bufPool.Put(body)
+		body = make([]byte, bodyLen)
 	} else {
-		body = body[:bodyLength]
+		body = body[:bodyLen]
+	}
+
+	// 空载荷直接返回（例如心跳帧）
+	if bodyLen == 0 {
+		return body, true, nil // 调用方负责 Put(body)
 	}
 
 	if _, err := io.ReadFull(conn, body); err != nil {
-		logger.Debug("ConnectContext disconnected:", conn.RemoteAddr(), err)
+		// 读取失败要把刚取出的 buffer 归还
 		bufPool.Put(body)
 		return nil, false, err
 	}

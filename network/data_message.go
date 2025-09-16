@@ -14,8 +14,9 @@ type (
 		Code  int16
 	}
 	DataMessage struct {
-		Header IDataHeader
-		Msg    []byte
+		Header  IDataHeader
+		Msg     []byte
+		release func()
 	}
 )
 
@@ -30,6 +31,13 @@ func (d *DataHeader) SetCode(code int16) {
 }
 func (d *DataHeader) ToString() string {
 	return "DataHeader{MsgId: " + strconv.Itoa(int(d.MsgId)) + ", Code: " + strconv.Itoa(int(d.Code)) + "}"
+}
+
+func (m *DataMessage) Close() {
+	if m != nil && m.release != nil {
+		m.release()
+		m.release = nil
+	}
 }
 
 func NewDataMessage(header IDataHeader, msg []byte) *DataMessage {

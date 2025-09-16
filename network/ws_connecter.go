@@ -14,40 +14,46 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
-
 	"github.com/smart1986/go-quick/logger"
 )
 
 // =========== WebSocket Connector ===========
 
 type WSConnector struct {
-	ServerURL      string // 如：ws://127.0.0.1:8080/ws  或 wss://host/ws
-	Conn           *websocket.Conn
-	running        int32
-	reconnecting   int32
-	mu             sync.RWMutex
-	writeMu        sync.Mutex
+	ServerURL string // ws://host:port/path 或 wss://...
+	Conn      *websocket.Conn
+
+	running      int32
+	reconnecting int32
+
+	mu      sync.RWMutex // 保护 Conn
+	writeMu sync.Mutex   // 串行化写
+
 	MessageHandler func(*DataMessage)
 	Decoder        IDecode
 	bufPool        *BufPool
 
 	// 可选配置
 	DialTimeout  time.Duration // 拨号超时
-	IdleTimeout  time.Duration // 读超时(空闲)
+	IdleTimeout  time.Duration // 读空闲超时（无消息时的等待时长）
 	WriteTimeout time.Duration // 写超时
 
 	// 重连参数
-	MaxAttempts   int
-	BaseDelay     time.Duration
-	MaxDelay      time.Duration
-	JitterPercent float64
+	MaxAttempts   int           // -1 = 无限
+	BaseDelay     time.Duration // 指数退避基准
+	MaxDelay      time.Duration // 退避上限
+	JitterPercent float64       // 抖动
 
 	// HTTP 头（鉴权等）
 	Header http.Header
+
+	// 生命周期
+	startOnce sync.Once
+	ctx       context.Context
+	cancel    context.CancelFunc
 }
 
 func init() {
-	// 给 backoff 抖动做个随机种子
 	rand.Seed(time.Now().UnixNano())
 }
 
@@ -56,6 +62,7 @@ func NewWSConnector(serverURL string, decoder IDecode, messageHandler func(*Data
 		logger.Error("NewWSConnector: invalid args")
 		return nil
 	}
+	cctx, cancel := context.WithCancel(context.Background())
 	c := &WSConnector{
 		ServerURL:      serverURL,
 		Decoder:        decoder,
@@ -69,6 +76,8 @@ func NewWSConnector(serverURL string, decoder IDecode, messageHandler func(*Data
 		MaxDelay:       5 * time.Second,
 		JitterPercent:  0.2,
 		Header:         http.Header{},
+		ctx:            cctx,
+		cancel:         cancel,
 	}
 	atomic.StoreInt32(&c.running, 1)
 	return c
@@ -100,12 +109,15 @@ func (c *WSConnector) Connect() error {
 	if err := c.dialOnce(ctx); err != nil {
 		return err
 	}
-	go c.readLoop()
+	c.startOnce.Do(func() { go c.readLoop() })
 	return nil
 }
 
 func (c *WSConnector) readLoop() {
 	defer func() {
+		if r := recover(); r != nil {
+			logger.Error("websocket.readLoop panic:", r)
+		}
 		logger.Debug("websocket.readLoop exit")
 		c.Close()
 	}()
@@ -117,63 +129,70 @@ func (c *WSConnector) readLoop() {
 		conn := c.Conn
 		c.mu.RUnlock()
 		if conn == nil {
-			if err := c.reconnectWithBackoff(context.Background()); err != nil {
+			if err := c.reconnectWithBackoff(c.ctx); err != nil {
+				if atomic.LoadInt32(&c.running) == 0 {
+					return
+				}
 				logger.Error("WS reconnect failed:", err)
 				return
 			}
-			// 重连成功后，避免老半包污染
-			buf = nil
+			buf = nil // 重连成功后清半包
 			continue
 		}
 
-		// 读超时：用 Context 控制
+		// 读：用 context 控制超时（无消息时希望“继续等”，不应重连）
 		readCtx, cancel := context.WithTimeout(context.Background(), chooseTimeout(c.IdleTimeout, 70*time.Second))
 		mt, data, err := conn.Read(readCtx)
 		cancel()
 		if err != nil {
-			logger.Debug("WS read error, will reconnect:", err)
+			// 空闲超时：只是没有消息，继续读即可
+			if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+				continue
+			}
+			// 如果是对端关闭/正常关闭，也会在 CloseStatus 有代码
+			code := websocket.CloseStatus(err)
+			if code != -1 {
+				logger.Debug("WS closed by peer, code:", code, "err:", err)
+			} else {
+				logger.Debug("WS read error, will reconnect:", err)
+			}
 			_ = conn.Close(websocket.StatusAbnormalClosure, "read error")
 			c.mu.Lock()
 			if c.Conn == conn {
 				c.Conn = nil
 			}
 			c.mu.Unlock()
-
-			if err := c.reconnectWithBackoff(context.Background()); err != nil {
-				logger.Error("WS reconnect failed:", err)
-				return
-			}
-			// 重连成功后清理半包
+			// 下一轮触发重连
 			buf = nil
 			continue
 		}
 		if mt != websocket.MessageBinary {
-			// 如需支持文本/其他类型，可在此处理或记录
+			// 如需支持文本/其他类型，可在此处理
 			logger.Debug("WS non-binary message ignored")
 			continue
 		}
 
+		// 按业务帧协议拼接/切分
 		buf = join(buf, data)
-		frames, remain, err := wsDeframe(buf)
-		if err != nil {
-			logger.Error("WS deframe error:", err)
+		frames, remain, defErr := wsDeframe(buf)
+		if defErr != nil {
+			logger.Error("WS deframe error:", defErr)
 			_ = conn.Close(websocket.StatusProtocolError, "bad frame")
 			c.mu.Lock()
 			if c.Conn == conn {
 				c.Conn = nil
 			}
 			c.mu.Unlock()
-			// 立即在下一轮触发重连；同时清空缓冲
 			buf = nil
 			continue
 		}
 		buf = remain
 
 		for _, frame := range frames {
-			// 注意：frame 是新分配的切片，不应放回 bufPool（避免污染池）
+			// frame 是新分配的切片（append(nil, body...)），不是池内存
 			msg := c.Decoder.Decode(c.bufPool, frame)
 			if msg == nil {
-				logger.Error("Decoder returned nil; closing")
+				logger.Error("Decoder returned nil; closing ws")
 				_ = conn.Close(websocket.StatusProtocolError, "decode nil")
 				c.mu.Lock()
 				if c.Conn == conn {
@@ -183,9 +202,23 @@ func (c *WSConnector) readLoop() {
 				break
 			}
 			if c.MessageHandler != nil {
-				c.MessageHandler(msg)
+				func() {
+					defer func() {
+						if r := recover(); r != nil {
+							logger.Error("MessageHandler panic:", r)
+						}
+						// 统一回收 Decode 产生的 payload
+						if msg.Msg != nil {
+							msg.Close()
+						}
+					}()
+					c.MessageHandler(msg)
+				}()
+			} else {
+				if msg.Msg != nil {
+					msg.Close()
+				}
 			}
-			// 移除：c.bufPool.Put(frame)  —— frame 非池内存，不可 Put
 		}
 	}
 }
@@ -197,7 +230,13 @@ func (c *WSConnector) reconnectWithBackoff(ctx context.Context) error {
 	if !atomic.CompareAndSwapInt32(&c.reconnecting, 0, 1) {
 		// 已在重连中，等待其完成
 		for atomic.LoadInt32(&c.reconnecting) == 1 && atomic.LoadInt32(&c.running) == 1 {
-			time.Sleep(50 * time.Millisecond)
+			select {
+			case <-time.After(50 * time.Millisecond):
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-c.ctx.Done():
+				return c.ctx.Err()
+			}
 		}
 		if atomic.LoadInt32(&c.running) == 0 {
 			return errors.New("stopped")
@@ -217,11 +256,13 @@ func (c *WSConnector) reconnectWithBackoff(ctx context.Context) error {
 		}
 		backoff := expBackoff(c.BaseDelay, c.MaxDelay, attempt)
 		backoff = addJitter(backoff, c.JitterPercent)
-		logger.Debug("WS reconnect attempt", attempt, "in", backoff)
+		logger.Debug("WS reconnect attempt", attempt, "in", backoff, "err:", err)
 		select {
 		case <-time.After(backoff):
 		case <-ctx.Done():
 			return ctx.Err()
+		case <-c.ctx.Done():
+			return c.ctx.Err()
 		}
 	}
 	return fmt.Errorf("ws reconnect exhausted after %d attempts", attempt)
@@ -238,24 +279,43 @@ func (c *WSConnector) SendMessage(msg *DataMessage) error {
 		return errors.New("no active connection")
 	}
 
+	// 业务帧编码（包含 4B totalLen）
 	frame, err := wsBuildFrame(msg)
 	if err != nil {
 		return err
 	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), chooseTimeout(c.WriteTimeout, 5*time.Second))
 	defer cancel()
 
-	// 避免多协程并发写
+	// 串行化写，避免帧交叠
 	c.writeMu.Lock()
-	defer c.writeMu.Unlock()
-	return conn.Write(ctx, websocket.MessageBinary, frame)
+	err = conn.Write(ctx, websocket.MessageBinary, frame)
+	c.writeMu.Unlock()
+
+	if err != nil {
+		// 写失败：立刻关闭并让读循环触发重连
+		logger.Error("WS send error:", err)
+		c.mu.Lock()
+		if c.Conn == conn {
+			_ = c.Conn.Close(websocket.StatusAbnormalClosure, "write error")
+			c.Conn = nil
+		}
+		c.mu.Unlock()
+		return err
+	}
+	return nil
 }
 
 func (c *WSConnector) Close() {
 	if !atomic.CompareAndSwapInt32(&c.running, 1, 0) {
 		return
 	}
+	if c.cancel != nil {
+		c.cancel() // 取消任何等待中的退避
+	}
 	atomic.StoreInt32(&c.reconnecting, 0)
+
 	c.mu.Lock()
 	if c.Conn != nil {
 		_ = c.Conn.Close(websocket.StatusNormalClosure, "client close")
@@ -272,16 +332,16 @@ func wsBuildFrame(m *DataMessage) ([]byte, error) {
 	if !ok {
 		return nil, fmt.Errorf("invalid header type")
 	}
-	var bizHdr [6]byte
-	binary.BigEndian.PutUint32(bizHdr[0:4], uint32(h.MsgId))
-	binary.BigEndian.PutUint16(bizHdr[4:6], uint16(h.Code))
 	total := 4 + 6 + len(m.Msg)
-	var lenHdr [4]byte
-	binary.BigEndian.PutUint32(lenHdr[:], uint32(total))
 
-	out := make([]byte, 0, total)
-	out = append(out, bizHdr[:]...)
-	out = append(out, m.Msg...)
+	out := make([]byte, total)
+	// 写 4B 长度
+	binary.BigEndian.PutUint32(out[0:4], uint32(total))
+	// 写 6B 业务头
+	binary.BigEndian.PutUint32(out[4:8], uint32(h.MsgId))
+	binary.BigEndian.PutUint16(out[8:10], uint16(h.Code))
+	// 写 payload
+	copy(out[10:], m.Msg)
 	return out, nil
 }
 
@@ -300,21 +360,15 @@ func wsDeframe(buf []byte) (frames [][]byte, remain []byte, err error) {
 			return frames, buf[i:], nil
 		}
 		body := buf[i+4 : i+total] // 仅 body (6B头+payload)
+		// 复制一份独立切片，避免引用到不断增长的 buf
 		frames = append(frames, append([]byte(nil), body...))
 		i += total
 	}
 }
 
-// 更高效的 join（避免 bytes.Buffer 额外分配）
+// 更高效的 join（避免额外分配逻辑的复杂度）
 func join(a, b []byte) []byte {
-	// 若目标是简化，直接用 append；如需保留原语义也可保持 bytes.Buffer
 	return append(a, b...)
-	// 旧实现保留在此以供对比：
-	// var bb bytes.Buffer
-	// bb.Grow(len(a) + len(b))
-	// bb.Write(a)
-	// bb.Write(b)
-	// return bb.Bytes()
 }
 
 func expBackoff(base, max time.Duration, attempt int) time.Duration {

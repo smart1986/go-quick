@@ -2,39 +2,44 @@ package network
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/smart1986/go-quick/logger"
 	"math"
-	"math/big"
 	"net"
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"github.com/smart1986/go-quick/logger"
 )
 
+// Connector 管理 TCP 连接、读写循环与自动重连
 type Connector struct {
-	ServerAddr     string
-	Conn           net.Conn
-	running        int32 // 原子控制
-	reconnecting   int32 // 原子标记：是否处于重连中
-	mu             sync.RWMutex
-	writeMu        sync.Mutex
+	ServerAddr string
+
+	mu        sync.RWMutex // 保护 Conn
+	Conn      net.Conn
+	writeMu   sync.Mutex // 串行化写，避免帧交叠
+	running   int32      // 1=运行中, 0=已停止
+	reconning int32      // 1=正在重连
+
+	// 依赖
 	MessageHandler func(*DataMessage)
 	Decoder        IDecode
-	bufPool        *BufPool
 	Framer         IFramer
+	bufPool        *BufPool
 
-	// 可选配置
-	DialTimeout  time.Duration // 连接超时
-	IdleTimeout  time.Duration // 读超时(空闲)
-	WriteTimeout time.Duration // 写超时
+	// 参数
+	DialTimeout  time.Duration // 拨号超时
+	IdleTimeout  time.Duration // 读空闲超时（ReadDeadline）
+	WriteTimeout time.Duration // 写超时（WriteDeadline）
+
+	// 生命周期控制
+	startOnce sync.Once
+	ctx       context.Context
+	cancel    context.CancelFunc
 }
 
-// NewConnector 要求：serverAddr、marshal、decoder、framer、messageHandler 必须提供
+// NewConnector 要求：serverAddr、decoder、framer、messageHandler 必须提供
 func NewConnector(serverAddr string, decoder IDecode, framer IFramer, messageHandler func(message *DataMessage)) *Connector {
 	switch {
 	case serverAddr == "":
@@ -50,6 +55,7 @@ func NewConnector(serverAddr string, decoder IDecode, framer IFramer, messageHan
 		logger.Error("NewConnector: messageHandler required")
 		return nil
 	}
+	cctx, cancel := context.WithCancel(context.Background())
 	c := &Connector{
 		ServerAddr:     serverAddr,
 		Decoder:        decoder,
@@ -59,6 +65,8 @@ func NewConnector(serverAddr string, decoder IDecode, framer IFramer, messageHan
 		DialTimeout:    5 * time.Second,
 		IdleTimeout:    60 * time.Second,
 		WriteTimeout:   10 * time.Second,
+		ctx:            cctx,
+		cancel:         cancel,
 	}
 	atomic.StoreInt32(&c.running, 1)
 	return c
@@ -82,6 +90,7 @@ func (c *Connector) dialOnce(ctx context.Context) (net.Conn, error) {
 	return conn, nil
 }
 
+// Connect 拨号+启动读循环（幂等：readLoop 只会启动一次）
 func (c *Connector) Connect() error {
 	if atomic.LoadInt32(&c.running) == 0 {
 		return errors.New("connector is not running")
@@ -98,13 +107,16 @@ func (c *Connector) Connect() error {
 	c.mu.Unlock()
 	logger.Info("Connected to server:", c.ServerAddr)
 
-	go c.readLoop() // 仅首次连接后启动读循环
+	c.startOnce.Do(func() { go c.readLoop() })
 	return nil
 }
 
 // readLoop：持续读取帧 -> 解码 -> 回调 MessageHandler
 func (c *Connector) readLoop() {
 	defer func() {
+		if r := recover(); r != nil {
+			logger.Error("readLoop panic:", r)
+		}
 		logger.Debug("readLoop exit")
 		c.Close()
 	}()
@@ -117,8 +129,12 @@ func (c *Connector) readLoop() {
 
 		if conn == nil {
 			// 尚未建立或已断开，尝试重连（只拨号，不再起新的 readLoop）
-			if err := c.reconnectWithBackoff(context.Background()); err != nil {
+			if err := c.reconnectWithBackoff(c.ctx); err != nil {
+				if atomic.LoadInt32(&c.running) == 0 {
+					return
+				}
 				logger.Error("Reconnect failed:", err)
+				// 发生不可恢复错误，退出
 				return
 			}
 			continue
@@ -131,15 +147,21 @@ func (c *Connector) readLoop() {
 			_ = conn.SetReadDeadline(time.Time{})
 		}
 
-		// 读取完整帧（是否含4字节长度由 IHandlerPacket 定义）
+		// 读取完整帧（DeFrame 语义：返回 body（来自池）、ok、err；调用方负责 Put(body)）
 		array, ok, herr := c.Framer.DeFrame(conn, c.bufPool)
+
+		// 错误分类
 		if herr != nil {
-			// 区分超时/协议错误/对端关闭（这里统一记日志；如需细分可判断 net.Error）
-			logger.Debug("HandlePacket error:", herr)
+			// 超时：继续循环（空闲）
+			var ne net.Error
+			if errors.As(herr, &ne) && ne.Timeout() {
+				continue
+			}
+			// 其他错误（EOF/closed/网络错/协议错）：按断开处理
 		}
-		if !ok {
+
+		if !ok || herr != nil {
 			// 连接不可用：关闭当前连接并置空，然后重连
-			logger.Debug("Connection lost; will reconnect…")
 			_ = conn.Close()
 			c.mu.Lock()
 			if c.Conn == conn {
@@ -147,37 +169,56 @@ func (c *Connector) readLoop() {
 			}
 			c.mu.Unlock()
 
-			if err := c.reconnectWithBackoff(context.Background()); err != nil {
+			if err := c.reconnectWithBackoff(c.ctx); err != nil {
+				if atomic.LoadInt32(&c.running) == 0 {
+					return
+				}
 				logger.Error("Reconnect failed:", err)
 				return
 			}
 			continue
 		}
 
-		// 正常收到数据，解码
-		msg := c.Decoder.Decode(c.bufPool, array)
-		if msg == nil {
-			logger.Error("Decoder returned nil; closing current connection")
-			_ = conn.Close()
-			c.mu.Lock()
-			if c.Conn == conn {
-				c.Conn = nil
-			}
-			c.mu.Unlock()
+		// 针对本帧建立作用域，确保 defer 在每帧结束就执行（不拖到循环结束）
+		func() {
+			// 总是归还 DeFrame 拿到的 array
+			defer c.bufPool.Put(array)
 
-			// 尝试重连
-			if err := c.reconnectWithBackoff(context.Background()); err != nil {
-				logger.Error("Reconnect failed:", err)
+			// 正常收到数据，解码（Decode 会拷贝 payload 到新缓冲（来自池））
+			msg := c.Decoder.Decode(c.bufPool, array)
+			if msg == nil {
+				logger.Error("Decoder returned nil; closing current connection")
+				_ = conn.Close()
+				c.mu.Lock()
+				if c.Conn == conn {
+					c.Conn = nil
+				}
+				c.mu.Unlock()
+				// 触发重连由下一轮循环完成
 				return
 			}
-			continue
-		}
 
-		if c.MessageHandler != nil {
-			c.MessageHandler(msg)
-		}
-		// 假设 HandlePacket 返回的 array 来自 bufPool，这里回收
-		c.bufPool.Put(array)
+			// 调用回调；确保用完后归还 msg.Msg（Decode 文档要求上层 Put）
+			if c.MessageHandler != nil {
+				func() {
+					defer func() {
+						if r := recover(); r != nil {
+							logger.Error("MessageHandler panic:", r)
+						}
+						// 统一回收 payload
+						if msg.Msg != nil {
+							msg.Close()
+						}
+					}()
+					c.MessageHandler(msg)
+				}()
+			} else {
+				// 没有回调也要回收 payload
+				if msg.Msg != nil {
+					msg.Close()
+				}
+			}
+		}()
 	}
 }
 
@@ -187,27 +228,31 @@ func (c *Connector) reconnectWithBackoff(ctx context.Context) error {
 		return errors.New("not running")
 	}
 	// 防止并发重连
-	if !atomic.CompareAndSwapInt32(&c.reconnecting, 0, 1) {
+	if !atomic.CompareAndSwapInt32(&c.reconning, 0, 1) {
 		// 已经有人在重连了：等待其结束
-		for atomic.LoadInt32(&c.reconnecting) == 1 && atomic.LoadInt32(&c.running) == 1 {
-			time.Sleep(50 * time.Millisecond)
+		for atomic.LoadInt32(&c.reconning) == 1 && atomic.LoadInt32(&c.running) == 1 {
+			select {
+			case <-time.After(50 * time.Millisecond):
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-c.ctx.Done():
+				return c.ctx.Err()
+			}
 		}
 		if atomic.LoadInt32(&c.running) == 0 {
 			return errors.New("stopped")
 		}
 		return nil
 	}
-	defer atomic.StoreInt32(&c.reconnecting, 0)
+	defer atomic.StoreInt32(&c.reconning, 0)
 
 	const (
-		maxAttempts   = 10
 		baseDelay     = 200 * time.Millisecond
 		maxDelay      = 5 * time.Second
 		jitterPercent = 0.2 // ±20%
 	)
 
-	var lastErr error
-	for attempt := 0; attempt < maxAttempts && atomic.LoadInt32(&c.running) == 1; attempt++ {
+	for attempt := 0; atomic.LoadInt32(&c.running) == 1; attempt++ {
 		dctx, cancel := context.WithTimeout(ctx, c.DialTimeout)
 		newConn, err := c.dialOnce(dctx)
 		cancel()
@@ -215,7 +260,6 @@ func (c *Connector) reconnectWithBackoff(ctx context.Context) error {
 		if err == nil {
 			// 成功：替换连接；旧连接若仍存活，readLoop 上一轮会关闭它
 			c.mu.Lock()
-			// 保险起见，关闭旧 conn（如果还在）
 			old := c.Conn
 			c.Conn = newConn
 			c.mu.Unlock()
@@ -227,8 +271,7 @@ func (c *Connector) reconnectWithBackoff(ctx context.Context) error {
 			return nil
 		}
 
-		lastErr = err
-		// 退避 + 抖动
+		// 退避 + 抖动（可被 ctx/c.ctx 取消）
 		backoff := time.Duration(float64(baseDelay) * math.Pow(2, float64(attempt)))
 		if backoff > maxDelay {
 			backoff = maxDelay
@@ -239,15 +282,14 @@ func (c *Connector) reconnectWithBackoff(ctx context.Context) error {
 		case <-time.After(j):
 		case <-ctx.Done():
 			return ctx.Err()
+		case <-c.ctx.Done():
+			return c.ctx.Err()
 		}
 	}
-	if lastErr == nil {
-		lastErr = errors.New("unknown reconnect error")
-	}
-	return fmt.Errorf("reconnect exhausted: %w", lastErr)
+	return errors.New("stopped")
 }
 
-// SendMessage：writev 发送；失败返回错误，不做自动重连（由读循环驱动重连更干净）
+// SendMessage：writev 发送；失败返回错误，并主动关闭触发重连（由读循环处理）
 func (c *Connector) SendMessage(msg *DataMessage) error {
 	if atomic.LoadInt32(&c.running) == 0 {
 		return errors.New("connector stopped")
@@ -273,16 +315,27 @@ func (c *Connector) SendMessage(msg *DataMessage) error {
 
 	if err != nil {
 		logger.Error("Send error:", err, ", bytes:", n)
+		// 主动触发重连：关闭并置空
+		c.mu.Lock()
+		if c.Conn == conn {
+			_ = c.Conn.Close()
+			c.Conn = nil
+		}
+		c.mu.Unlock()
 		return err
 	}
 	return nil
 }
 
+// Close 关闭连接器与当前连接，并取消重连等待
 func (c *Connector) Close() {
 	if !atomic.CompareAndSwapInt32(&c.running, 1, 0) {
 		return
 	}
-	atomic.StoreInt32(&c.reconnecting, 0)
+	if c.cancel != nil {
+		c.cancel() // 取消任何等待中的重连退避
+	}
+	atomic.StoreInt32(&c.reconning, 0)
 
 	c.mu.Lock()
 	if c.Conn != nil {
@@ -303,11 +356,9 @@ func jitter(d time.Duration, rate float64) time.Duration {
 	if max == 0 {
 		return d
 	}
-	n, err := rand.Int(rand.Reader, big.NewInt(max*2+1))
-	if err != nil {
-		return d
-	}
-	off := n.Int64() - max
+	// 这里使用 crypto/rand 或 math/rand 都可；如需更快可换 math/rand
+	n := time.Now().UnixNano() % ((max * 2) + 1) // 简易、足够的抖动
+	off := n - max
 	return time.Duration(int64(d) + off)
 }
 
@@ -316,7 +367,7 @@ func jitter(d time.Duration, rate float64) time.Duration {
 func buildHeartbeatFrame() []byte {
 	const total = 10 // 4(len)+6(header)
 	buf := make([]byte, total)
-	binary.BigEndian.PutUint32(buf[0:4], total)
+	// binary.BigEndian.PutUint32(buf[0:4], total)
 	// header 自行约定（例如 MsgId=0/Code=0）
 	return buf
 }

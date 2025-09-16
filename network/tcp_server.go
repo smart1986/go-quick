@@ -29,8 +29,9 @@ type (
 		ConnectIdentifyParser IConnectIdentifyParser
 
 		BufPool *BufPool
-		clients sync.Map
+		clients sync.Map // key: connectId string, val: *ConnectContext
 	}
+
 	ConnectContext struct {
 		ConnectId             uuid.UUID
 		lastActive            time.Time
@@ -76,6 +77,15 @@ func (t *TcpServer) Start(addr string) {
 	system.RegisterExitHandler(t)
 
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				buf := make([]byte, 2048)
+				n := runtime.Stack(buf, false)
+				logger.Error("Accept loop panic:", r)
+				logger.Error("Stack trace:", string(buf[:n]))
+			}
+		}()
+
 		for atomic.LoadInt32(&t.running) == 1 {
 			conn, err := ln.Accept()
 			if err != nil {
@@ -124,6 +134,16 @@ func (t *TcpServer) GetConnectContext(connectId string) IConnectContext {
 }
 
 func handleConnection(_ context.Context, conn net.Conn, t *TcpServer) {
+	// 顶层保护，避免单连接异常影响整体
+	defer func() {
+		if r := recover(); r != nil {
+			buf := make([]byte, 2048)
+			n := runtime.Stack(buf, false)
+			logger.Error("handleConnection panic:", r)
+			logger.Error("Stack trace:", string(buf[:n]))
+		}
+	}()
+
 	// TCP 优化
 	if tcp, ok := conn.(*net.TCPConn); ok {
 		_ = tcp.SetNoDelay(true)
@@ -152,7 +172,7 @@ func handleConnection(_ context.Context, conn net.Conn, t *TcpServer) {
 	defer t.CloseContext(client)
 
 	for client.Running && atomic.LoadInt32(&t.running) == 1 {
-		// 用 ReadDeadline 控 idle，避免 ticker + 数据竞争
+		// 用 ReadDeadline 控 idle（你的策略：超时=断开）
 		if t.IdleTimeout > 0 {
 			_ = conn.SetReadDeadline(time.Now().Add(t.IdleTimeout))
 		} else {
@@ -162,29 +182,37 @@ func handleConnection(_ context.Context, conn net.Conn, t *TcpServer) {
 		// 读取一帧（body = 业务头6B + payload）
 		array, ok, err := t.Framer.DeFrame(conn, t.BufPool)
 		if !ok {
+			// 你的既定策略：读超时也断开
 			var ne net.Error
 			if errors.As(err, &ne) && ne.Timeout() {
 				if t.SessionHandler != nil {
 					t.SessionHandler.OnIdleTimeout(client)
 				}
 			}
-			logger.Debug("Connection lost, stopping client:", client.ConnectId)
+			logger.Debug("Connection lost, stopping client:", client.ConnectId, ", err:", err)
 			return
 		}
 		client.lastActive = time.Now()
 
-		dataMessage := t.Decoder.Decode(t.BufPool, array)
-		t.BufPool.Put(array) // 归还读取 buffer
+		// 每帧作用域，确保 array 必定归还
+		func() {
+			defer t.BufPool.Put(array)
 
-		// 健壮性：解码失败直接断开
-		if dataMessage == nil || dataMessage.Header == nil {
-			logger.Error("Decode failed; closing client:", client.ConnectId)
-			return
-		}
+			dataMessage := t.Decoder.Decode(t.BufPool, array)
 
-		logger.Debug("Received data message, header:", dataMessage.Header, ", length:", len(dataMessage.Msg), ", from:", client.ConnectId)
-		client.Execute(dataMessage)
-		t.BufPool.Put(dataMessage.Msg) // 归还业务 buffer
+			// 健壮性：解码失败直接断开
+			if dataMessage == nil || dataMessage.Header == nil {
+				logger.Error("Decode failed; closing client:", client.ConnectId)
+				client.Running = false
+				return
+			}
+
+			logger.Debug("Received data message, header:", dataMessage.Header, ", length:", len(dataMessage.Msg), ", from:", client.ConnectId)
+			client.Execute(dataMessage)
+
+			// ✅ 统一通过 Close() 回收 payload（避免重复 Put）
+			dataMessage.Close()
+		}()
 	}
 }
 
@@ -248,6 +276,9 @@ func (c *ConnectContext) SendMessage(msg *DataMessage) {
 
 	if err != nil {
 		logger.Error("Send error:", err, ", bytes:", n)
+		// 写失败视为连接异常：立刻关闭，促使读循环退出并由 defer 清理会话
+		_ = c.Conn.Close()
+		c.Running = false
 		return
 	}
 	logger.Debug("Send to:", c.ConnectId, ", bytes:", n, ", header:", msg.Header.ToString())
