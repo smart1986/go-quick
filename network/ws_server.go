@@ -71,7 +71,7 @@ func (wsc *WSConnectContext) Execute(msg *DataMessage) {
 	wsc.MessageRouter.Route(identify, wsc, msg)
 }
 
-// 发送一条业务帧（帧格式：4B总长 + 6B头 + payload）
+// SendMessage 发送一条业务帧（帧格式：4B总长 + 6B头 + payload）
 // 失败时立即关闭连接，促使读循环尽快退出
 func (wsc *WSConnectContext) SendMessage(msg *DataMessage) {
 	wctx, wcancel := context.WithTimeout(context.Background(), 5*time.Second)
