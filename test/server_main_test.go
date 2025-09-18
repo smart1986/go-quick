@@ -30,7 +30,7 @@ func TestServer(tt *testing.T) {
 	}
 
 	t := &TestServerHandler{}
-	network.RegisterMessageHandler(t, false)
+	network.RegisterMessageHandler[string, int](1, t, false)
 
 	tcpNet.Start(config.GlobalConfig.Server.Addr)
 
@@ -42,13 +42,16 @@ type (
 	TestSessionHandler struct{}
 )
 
-func (receiver *TestServerHandler) Execute(connectIdentify interface{}, c network.IConnectContext, dataMessage *network.DataMessage) *network.DataMessage {
+//var _ network.MessageExecutor[[]byte, int] = (*TestServerHandler)(nil)
+
+func (receiver *TestServerHandler) Handle(uid int, context network.IConnectContext, dataMessage *network.DataMessage, data string) *network.DataMessage {
 	logger.Info("Received message:", dataMessage)
-	c.SendMessage(dataMessage)
+	context.SendMessage(dataMessage)
 	return nil
 }
-func (receiver *TestServerHandler) MsgId() int32 {
-	return 1
+
+func (receiver *TestServerHandler) Unmarshal(data []byte) (string, error) {
+	return string(data), nil
 }
 
 func (receiver *TestSessionHandler) OnAccept(context network.IConnectContext) {

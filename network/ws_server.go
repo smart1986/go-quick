@@ -41,7 +41,7 @@ type (
 		Running               bool
 		MessageRouter         Router
 		ConnectIdentifyParser IConnectIdentifyParser
-		Session               map[string]interface{}
+		Session               map[string]any
 		Framer                IFramer
 		BufPool               *BufPool
 		writeMu               sync.Mutex
@@ -59,7 +59,7 @@ func (wsc *WSConnectContext) Execute(msg *DataMessage) {
 		}
 	}()
 
-	var identify interface{}
+	var identify any
 	if wsc.ConnectIdentifyParser != nil {
 		id, err := wsc.ConnectIdentifyParser.ParseConnectIdentify(wsc)
 		if err != nil {
@@ -88,12 +88,12 @@ func (wsc *WSConnectContext) SendMessage(msg *DataMessage) {
 	}
 }
 
-func (wsc *WSConnectContext) WriteSession(key string, value interface{}) {
+func (wsc *WSConnectContext) WriteSession(key string, value any) {
 	wsc.sessionMu.Lock()
 	wsc.Session[key] = value
 	wsc.sessionMu.Unlock()
 }
-func (wsc *WSConnectContext) GetSession(key string) interface{} {
+func (wsc *WSConnectContext) GetSession(key string) any {
 	wsc.sessionMu.RLock()
 	v := wsc.Session[key]
 	wsc.sessionMu.RUnlock()
@@ -110,7 +110,7 @@ func (wsc *WSConnectContext) GetConnectId() string {
 }
 
 func (wss *WSServer) OnSystemExit() {
-	wss.clients.Range(func(key, value interface{}) bool {
+	wss.clients.Range(func(key, value any) bool {
 		wss.CloseContext(value.(*WSConnectContext))
 		return true
 	})
@@ -186,7 +186,7 @@ func (wss *WSServer) wsHandler(wr http.ResponseWriter, req *http.Request) {
 		Running:               true,
 		lastActive:            time.Now(),
 		MessageRouter:         wss.Router,
-		Session:               make(map[string]interface{}),
+		Session:               make(map[string]any),
 		ConnectIdentifyParser: wss.ConnectIdentifyParser,
 		BufPool:               wss.BufPool,
 		Framer:                wss.Framer,

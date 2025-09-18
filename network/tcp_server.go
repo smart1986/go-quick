@@ -39,7 +39,7 @@ type (
 		Running               bool
 		MessageRouter         Router
 		ConnectIdentifyParser IConnectIdentifyParser
-		Session               map[string]interface{}
+		Session               map[string]any
 		BufPool               *BufPool
 		ServerFramer          IFramer
 		writeMu               sync.Mutex
@@ -114,7 +114,7 @@ func (t *TcpServer) OnSystemExit() {
 	}
 
 	// 关闭所有连接
-	t.clients.Range(func(key, value interface{}) bool {
+	t.clients.Range(func(key, value any) bool {
 		t.CloseContext(value.(*ConnectContext))
 		return true
 	})
@@ -157,7 +157,7 @@ func handleConnection(_ context.Context, conn net.Conn, t *TcpServer) {
 		Running:               true,
 		lastActive:            time.Now(),
 		MessageRouter:         t.Router,
-		Session:               make(map[string]interface{}),
+		Session:               make(map[string]any),
 		ConnectIdentifyParser: t.ConnectIdentifyParser,
 		BufPool:               t.BufPool,
 		ServerFramer:          t.Framer,
@@ -240,7 +240,17 @@ func (t *TcpServer) CloseContext(connectContext IConnectContext) {
 
 func printMessageHandler() {
 	for k, v := range MessageHandler {
-		logger.Info("register msgId:", k, ",handler:", reflect.ValueOf(v.Handler).Type())
+		rv := reflect.ValueOf(v)
+		if rv.Kind() == reflect.Ptr {
+			rv = rv.Elem()
+		}
+		fv := rv.FieldByName("handlerName")
+
+		if fv.IsValid() && fv.Kind() == reflect.String {
+			logger.Info("Registered message handler: msgId:", k, ", type:", fv.String())
+		} else {
+			logger.Info("Registered message handler: msgId:", k, ", type:", reflect.TypeOf(v).String())
+		}
 	}
 }
 
@@ -254,7 +264,7 @@ func (c *ConnectContext) Execute(message *DataMessage) {
 		}
 	}()
 
-	var identify interface{}
+	var identify any
 	if c.ConnectIdentifyParser != nil {
 		id, err := c.ConnectIdentifyParser.ParseConnectIdentify(c)
 		if err != nil {
@@ -284,12 +294,12 @@ func (c *ConnectContext) SendMessage(msg *DataMessage) {
 	logger.Debug("Send to:", c.ConnectId, ", bytes:", n, ", header:", msg.Header.ToString())
 }
 
-func (c *ConnectContext) WriteSession(key string, value interface{}) {
+func (c *ConnectContext) WriteSession(key string, value any) {
 	c.sessionMu.Lock()
 	c.Session[key] = value
 	c.sessionMu.Unlock()
 }
-func (c *ConnectContext) GetSession(key string) interface{} {
+func (c *ConnectContext) GetSession(key string) any {
 	c.sessionMu.RLock()
 	v := c.Session[key]
 	c.sessionMu.RUnlock()

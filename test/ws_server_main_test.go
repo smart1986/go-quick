@@ -21,7 +21,7 @@ func TestWSServer(tt *testing.T) {
 	}
 
 	t := &TestServerHandler{}
-	network.RegisterMessageHandler(t, false)
+	network.RegisterMessageHandler[string, int](1, t, false)
 
 	wsServer.Start(config.GlobalConfig.Server.Addr)
 
