@@ -1,6 +1,6 @@
 module github.com/smart1986/go-quick
 
-go 1.23.1
+go 1.24.7
 
 require (
 	github.com/coder/websocket v1.8.14
