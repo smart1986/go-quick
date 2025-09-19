@@ -3,15 +3,16 @@ package network
 import (
 	"context"
 	"errors"
-	"github.com/google/uuid"
-	"github.com/smart1986/go-quick/logger"
-	"github.com/smart1986/go-quick/system"
 	"net"
 	"reflect"
 	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/google/uuid"
+	"github.com/smart1986/go-quick/logger"
+	"github.com/smart1986/go-quick/system"
 )
 
 type (

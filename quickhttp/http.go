@@ -2,12 +2,13 @@ package quickhttp
 
 import (
 	"bytes"
-	"github.com/gin-gonic/gin"
-	"github.com/smart1986/go-quick/logger"
-	"go.uber.org/zap"
 	"io"
 	"strings"
 	"time"
+
+	"github.com/gin-gonic/gin"
+	"github.com/smart1986/go-quick/logger"
+	"go.uber.org/zap"
 )
 
 type HttpServer struct {

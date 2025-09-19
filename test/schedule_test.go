@@ -1,12 +1,13 @@
 package mytest
 
 import (
-	"github.com/smart1986/go-quick/config"
-	"github.com/smart1986/go-quick/logger"
-	"github.com/smart1986/go-quick/schedule"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/smart1986/go-quick/config"
+	"github.com/smart1986/go-quick/logger"
+	"github.com/smart1986/go-quick/schedule"
 )
 
 type (

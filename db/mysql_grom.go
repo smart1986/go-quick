@@ -3,12 +3,13 @@ package db
 import (
 	"database/sql"
 	"fmt"
+	"time"
+
 	"github.com/smart1986/go-quick/config"
 	"github.com/smart1986/go-quick/logger"
 	"github.com/smart1986/go-quick/system"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
-	"time"
 )
 
 var MysqlInstance *QMysql

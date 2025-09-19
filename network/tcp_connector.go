@@ -4,12 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/smart1986/go-quick/logger"
 	"math"
 	"net"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/smart1986/go-quick/logger"
 )
 
 // Connector 管理 TCP 连接、读写循环与自动重连
@@ -289,7 +290,7 @@ func (c *Connector) reconnectWithBackoff(ctx context.Context) error {
 	return errors.New("stopped")
 }
 
-// SendMessage：writev 发送；失败返回错误，并主动关闭触发重连（由读循环处理）
+// SendMessage writev 发送；失败返回错误，并主动关闭触发重连（由读循环处理）
 func (c *Connector) SendMessage(msg *DataMessage) error {
 	if atomic.LoadInt32(&c.running) == 0 {
 		return errors.New("connector stopped")

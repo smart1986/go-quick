@@ -2,14 +2,15 @@ package db
 
 import (
 	"context"
+	"log"
+	"time"
+
 	"github.com/smart1986/go-quick/config"
 	"github.com/smart1986/go-quick/logger"
 	"github.com/smart1986/go-quick/system"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
-	"log"
-	"time"
 )
 
 var MongoInstance *MongoDB

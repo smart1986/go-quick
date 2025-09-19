@@ -4,9 +4,10 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/smart1986/go-quick/logger"
 	"io"
 	"net"
+
+	"github.com/smart1986/go-quick/logger"
 )
 
 type (

@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+
 	"github.com/redis/go-redis/v9"
 	"github.com/smart1986/go-quick/config"
 	"github.com/smart1986/go-quick/logger"

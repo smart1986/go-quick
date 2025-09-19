@@ -1,9 +1,10 @@
 package network
 
 import (
-	"github.com/smart1986/go-quick/logger"
 	"reflect"
 	"strings"
+
+	"github.com/smart1986/go-quick/logger"
 )
 
 var (
@@ -89,12 +90,11 @@ func RegisterMessageHandlerLogin[T any, V any](msgId int32, handler MessageExecu
 }
 
 func (r *MessageRouter) Route(connectIdentify any, c IConnectContext, dataMessage *DataMessage) {
-	header := dataMessage.Header.(IDataHeader)
-	if handler, existsHandler := MessageHandler[header.GetMsgId()]; existsHandler {
+	if handler, existsHandler := MessageHandler[dataMessage.Header.GetMsgId()]; existsHandler {
 
 		if handler.CheckLogin() {
 			if connectIdentify == nil {
-				logger.Error("Connect identify is nil, msgId:", header.GetMsgId())
+				logger.Error("Connect identify is nil, msgId:", dataMessage.Header.GetMsgId())
 				return
 			}
 		}
@@ -103,6 +103,6 @@ func (r *MessageRouter) Route(connectIdentify any, c IConnectContext, dataMessag
 			c.SendMessage(response)
 		}
 	} else {
-		logger.Error("message handler not found, msgId:", header.GetMsgId())
+		logger.Error("message handler not found, msgId:", dataMessage.Header.GetMsgId())
 	}
 }

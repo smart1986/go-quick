@@ -2,10 +2,11 @@ package mytest
 
 import (
 	"fmt"
+	"testing"
+
 	"github.com/smart1986/go-quick/config"
 	"github.com/smart1986/go-quick/db"
 	"github.com/smart1986/go-quick/logger"
-	"testing"
 )
 
 type MyConfig struct {

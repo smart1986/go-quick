@@ -2,11 +2,12 @@ package thrid
 
 import (
 	"context"
+	"time"
+
 	"github.com/smart1986/go-quick/config"
 	"github.com/smart1986/go-quick/logger"
 	"github.com/smart1986/go-quick/system"
 	clientv3 "go.etcd.io/etcd/client/v3"
-	"time"
 )
 
 type (

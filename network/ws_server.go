@@ -4,14 +4,15 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
-	"github.com/coder/websocket"
-	"github.com/google/uuid"
-	"github.com/smart1986/go-quick/logger"
-	"github.com/smart1986/go-quick/system"
 	"net/http"
 	"runtime"
 	"sync"
 	"time"
+
+	"github.com/coder/websocket"
+	"github.com/google/uuid"
+	"github.com/smart1986/go-quick/logger"
+	"github.com/smart1986/go-quick/system"
 )
 
 type (

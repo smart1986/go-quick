@@ -1,11 +1,12 @@
 package mytest
 
 import (
+	"testing"
+
 	third "github.com/smart1986/go-quick/3rd"
 	"github.com/smart1986/go-quick/config"
 	"github.com/smart1986/go-quick/logger"
 	"github.com/smart1986/go-quick/system"
-	"testing"
 )
 
 func TestEtcdWatch(t *testing.T) {

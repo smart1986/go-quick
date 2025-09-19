@@ -2,10 +2,11 @@ package mytest
 
 import (
 	"context"
-	"github.com/smart1986/go-quick/config"
-	clientv3 "go.etcd.io/etcd/client/v3"
 	"testing"
 	"time"
+
+	"github.com/smart1986/go-quick/config"
+	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
 func TestEtcd(t *testing.T) {

@@ -2,13 +2,14 @@ package logger
 
 import (
 	"fmt"
+	"os"
+	"strings"
+	"time"
+
 	"github.com/smart1986/go-quick/config"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"gopkg.in/natefinch/lumberjack.v2"
-	"os"
-	"strings"
-	"time"
 )
 
 type (

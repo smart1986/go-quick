@@ -1,10 +1,11 @@
 package mytest
 
 import (
-	"github.com/smart1986/go-quick/config"
-	"github.com/smart1986/go-quick/logger"
 	"testing"
 	"time"
+
+	"github.com/smart1986/go-quick/config"
+	"github.com/smart1986/go-quick/logger"
 )
 
 type TimeOffsetHandler struct {

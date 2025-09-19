@@ -1,11 +1,12 @@
 package system
 
 import (
-	"github.com/smart1986/go-quick/logger"
 	"os"
 	"os/signal"
 	"reflect"
 	"syscall"
+
+	"github.com/smart1986/go-quick/logger"
 )
 
 type (

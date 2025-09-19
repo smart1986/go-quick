@@ -1,12 +1,13 @@
 package mytest
 
 import (
+	"testing"
+	"time"
+
 	"github.com/smart1986/go-quick/config"
 	"github.com/smart1986/go-quick/logger"
 	"github.com/smart1986/go-quick/network"
 	"github.com/smart1986/go-quick/system"
-	"testing"
-	"time"
 )
 
 func TestServer(tt *testing.T) {
