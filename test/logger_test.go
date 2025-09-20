@@ -21,8 +21,6 @@ func (t *TimeOffsetHandler) GetNowSecond() int64 {
 func TestLogger(t *testing.T) {
 	config.InitConfig("./config.yml", &config.Config{})
 	timeHandler := &TimeOffsetHandler{timeOffset: int64(time.Now().Unix() + 10000)}
-	log := &logger.QuickLogger{}
-	logger.DefaultLogger = log
-	log.NewLoggerOfTimeOffset(config.GlobalConfig, timeHandler, false)
-	log.Info("Starting server")
+	logger.NewLoggerOfTimeOffset(config.GlobalConfig, timeHandler, false)
+	logger.Info("Starting server")
 }

@@ -2,7 +2,6 @@ package db
 
 import (
 	"context"
-	"log"
 	"time"
 
 	"github.com/smart1986/go-quick/config"
@@ -79,17 +78,19 @@ func (m *MongoDB) InitDb(c *config.Config) {
 		clientOptions = options.Client().SetMaxPoolSize(poolSize).ApplyURI(c.Mongo.Uri)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	client, err := mongo.Connect(ctx, clientOptions)
 	if err != nil {
-		log.Fatalf("Failed to connect to MongoDB: %v", err)
+		logger.Error("Failed to connect to MongoDB: %v", err)
+		panic(err)
 	}
 
 	err = client.Ping(ctx, nil)
 	if err != nil {
-		log.Fatalf("Failed to ping MongoDB: %v", err)
+		logger.Error("Failed to ping MongoDB:", err)
+		panic(err)
 	}
 
 	m.MongoClient = client
