@@ -278,7 +278,7 @@ func (c *Connector) reconnectWithBackoff(ctx context.Context) error {
 			backoff = maxDelay
 		}
 		j := jitter(backoff, jitterPercent)
-		logger.Debug("Reconnect in", j, "err:", err)
+		logger.Debug("Reconnect in:", j, ",err:", err)
 		select {
 		case <-time.After(j):
 		case <-ctx.Done():
