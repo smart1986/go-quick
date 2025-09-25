@@ -23,10 +23,10 @@ func TestWSClient(t *testing.T) {
 		Code:  0,
 	}
 	msg := network.NewDataMessage(header, []byte("Hello"))
-	err1 := connector.SendMessage(msg)
+	err = connector.SendMessage(msg)
 
-	if err1 != nil {
-		logger.Info("Error sending message:", err1)
+	if err != nil {
+		logger.Info("Error sending message:", err)
 	}
 	system.WaitElegantExit(func() {
 		connector.Close()

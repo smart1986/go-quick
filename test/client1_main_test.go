@@ -9,18 +9,21 @@ import (
 	"github.com/smart1986/go-quick/system"
 )
 
-func TestClient(t *testing.T) {
+func Test1Client(t *testing.T) {
 	config.InitConfig("./config.yml", &config.Config{})
 	logger.NewLogger(config.GlobalConfig)
 	serverAddr := "127.0.0.1:8888"
-	connector := network.NewConnector(serverAddr, &network.DefaultDecoder{}, &network.DefaultFramer{}, test)
+	connector := network.NewConnector(serverAddr, &TestDecoder{}, &TestFramer{}, test1)
 	err := connector.Connect()
 	if err != nil {
 		panic(err)
 	}
-	header := &network.DataHeader{
-		MsgId: 1,
-		Code:  0,
+	header := &TestHeader{
+		DataHeader: &network.DataHeader{
+			MsgId: 1,
+			Code:  0,
+		},
+		RequestId: 123,
 	}
 	msg := network.NewDataMessage(header, []byte("Hello"))
 	err1 := connector.SendMessage(msg)
@@ -33,7 +36,7 @@ func TestClient(t *testing.T) {
 	})
 }
 
-func test(message *network.DataMessage) {
+func test1(message *network.DataMessage) {
 	logger.Info("Received message:", message)
 	logger.Info("Received message content:", string(message.Msg))
 
