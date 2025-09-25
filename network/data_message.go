@@ -16,7 +16,7 @@ type (
 	DataMessage struct {
 		Header  IDataHeader
 		Msg     []byte
-		release func()
+		Release func()
 	}
 )
 
@@ -34,9 +34,9 @@ func (d *DataHeader) ToString() string {
 }
 
 func (m *DataMessage) Close() {
-	if m != nil && m.release != nil {
-		m.release()
-		m.release = nil
+	if m != nil && m.Release != nil {
+		m.Release()
+		m.Release = nil
 	}
 }
 

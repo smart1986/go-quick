@@ -34,7 +34,7 @@ func GetClientService() *TcpClientService {
 	return clientInstance
 }
 
-func (cs *TcpClientService) Init(addr string, decoder IDecode, framer IFramer, size int) {
+func (cs *TcpClientService) Init(addr string, decoder IDecode, framer IFramer) {
 	cs.connector = NewConnector(addr, decoder, framer, cs.rec)
 	err := cs.connector.Connect()
 	if err != nil {

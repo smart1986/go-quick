@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"io"
 	"net"
-
-	"github.com/smart1986/go-quick/logger"
 )
 
 type (
@@ -22,34 +20,28 @@ type (
 var ErrProtocol = errors.New("protocol error")
 
 func (f *DefaultFramer) WriteFrame(conn net.Conn, m *DataMessage) (int64, error) {
-	h, ok := m.Header.(*DataHeader)
-	if !ok {
-		return 0, fmt.Errorf("invalid header type")
-	}
-	// 业务头
-	var bizHdr [6]byte
-	binary.BigEndian.PutUint32(bizHdr[0:4], uint32(h.MsgId))
-	binary.BigEndian.PutUint16(bizHdr[4:6], uint16(h.Code))
-	total := 4 + 6 + len(m.Msg)
-	var lenHdr [4]byte
-	binary.BigEndian.PutUint32(lenHdr[:], uint32(total))
+
+	lenHdr, bizHdr, _ := f.makeHeader(m)
 
 	buffs := net.Buffers{lenHdr[:], bizHdr[:], m.Msg}
 	return buffs.WriteTo(conn) // writev，零中间大包
 }
 
-func (f *DefaultFramer) CreateFrame(m *DataMessage) []byte {
-	h, ok := m.Header.(*DataHeader)
-	if !ok {
-		logger.Error("DefaultFramer: invalid header type")
-		return nil
-	}
+func (f *DefaultFramer) makeHeader(m *DataMessage) ([]byte, []byte, int) {
+	// 业务头
 	var bizHdr [6]byte
-	binary.BigEndian.PutUint32(bizHdr[0:4], uint32(h.MsgId))
-	binary.BigEndian.PutUint16(bizHdr[4:6], uint16(h.Code))
+	binary.BigEndian.PutUint32(bizHdr[0:4], uint32(m.Header.GetMsgId()))
+	binary.BigEndian.PutUint16(bizHdr[4:6], uint16(m.Header.GetCode()))
 	total := 4 + 6 + len(m.Msg)
+	// 总长头
 	var lenHdr [4]byte
 	binary.BigEndian.PutUint32(lenHdr[:], uint32(total))
+	return lenHdr[:], bizHdr[:], total
+}
+
+func (f *DefaultFramer) CreateFrame(m *DataMessage) []byte {
+	lenHdr, bizHdr, total := f.makeHeader(m)
+
 	frame := make([]byte, 0, total)
 	frame = append(frame, lenHdr[:]...)
 	frame = append(frame, bizHdr[:]...)

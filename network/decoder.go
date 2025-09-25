@@ -55,7 +55,7 @@ func (dm *DefaultDecoder) Decode(pool *BufPool, array []byte) *DataMessage {
 
 	// 统一释放策略：由使用者调用 msg.Close() 归还到池中
 	if n > 0 {
-		msg.release = func() {
+		msg.Release = func() {
 			pool.Put(payload)
 			msg.Msg = nil // 避免重复归还
 		}
