@@ -11,23 +11,30 @@ import (
 	"go.uber.org/zap"
 )
 
-type HttpServer struct {
-	Name      string
-	AllRoutes []*Route
-	Energy    *gin.Engine
-}
+type (
+	HttpServer[T any] struct {
+		Name      string
+		AllRoutes []*Route
+		Energy    *gin.Engine
+		Auth      IAuth[T]
+	}
+	Route struct {
+		Path      string
+		Method    string
+		Handler   gin.HandlerFunc
+		Protected bool
+	}
+	IMiddleware interface {
+		Middleware() gin.HandlerFunc
+	}
+	IAuth[T any] interface {
+		Middleware() gin.HandlerFunc
+		DecodeToken(tokenString string) (T, error)
+		EncodeToken(input T) (string, error)
+	}
+)
 
-type Route struct {
-	Path      string
-	Method    string
-	Handler   gin.HandlerFunc
-	Protected bool
-}
-type IMiddleware interface {
-	Middleware() gin.HandlerFunc
-}
-
-func (httpServer *HttpServer) Init(addr string, auth IMiddleware, block bool, middleware ...IMiddleware) {
+func (httpServer *HttpServer[T]) Init(addr string, auth IAuth[T], block bool, middleware ...IMiddleware) {
 
 	httpServer.Energy = gin.Default()
 	var middlewareList []gin.HandlerFunc
@@ -39,6 +46,7 @@ func (httpServer *HttpServer) Init(addr string, auth IMiddleware, block bool, mi
 
 	httpServer.Energy.Use(middlewareList...)
 	if auth != nil {
+		httpServer.Auth = auth
 		protected := httpServer.Energy.Group("/")
 		protected.Use(auth.Middleware())
 
@@ -117,7 +125,7 @@ func logRequestParams() gin.HandlerFunc {
 	}
 }
 
-func (httpServer *HttpServer) InitNoAuth(addr string, block bool, middleware ...IMiddleware) {
+func (httpServer *HttpServer[T]) InitNoAuth(addr string, block bool, middleware ...IMiddleware) {
 
 	httpServer.Energy = gin.Default()
 	var middlewareList []gin.HandlerFunc
@@ -146,7 +154,7 @@ func (httpServer *HttpServer) InitNoAuth(addr string, block bool, middleware ...
 	}
 }
 
-func (httpServer *HttpServer) RegisterRoute(path string, method string, handler gin.HandlerFunc, protected bool) {
+func (httpServer *HttpServer[T]) RegisterRoute(path string, method string, handler gin.HandlerFunc, protected bool) {
 	route := &Route{
 		Path:      path,
 		Method:    method,
@@ -157,7 +165,7 @@ func (httpServer *HttpServer) RegisterRoute(path string, method string, handler 
 }
 
 // RegisterRoutes 注册路由到 Gin Engine
-func registerRoutes(group *gin.RouterGroup, route *Route, httpServer *HttpServer) {
+func registerRoutes[T any](group *gin.RouterGroup, route *Route, httpServer *HttpServer[T]) {
 	method := strings.ToUpper(route.Method)
 	if group == nil {
 		switch method {
