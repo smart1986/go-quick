@@ -48,6 +48,44 @@ type (
 	}
 )
 
+func (t *TcpServer) AddConnect(c IConnectContext) {
+	t.clients.Store(c.GetConnectId(), c)
+}
+
+func (t *TcpServer) RemoveConnect(c IConnectContext) {
+	if c == nil {
+		return
+	}
+	// 幂等：只有第一次删除成功才继续收尾
+	if _, loaded := t.clients.LoadAndDelete(c.GetConnectId()); !loaded {
+		return
+	}
+	client, ok := c.(*ConnectContext)
+	if !ok {
+		return
+	}
+
+	client.Running = false
+	_ = client.Conn.Close()
+
+	if t.SessionHandler != nil {
+		t.SessionHandler.OnClose(c)
+	}
+	logger.Debug("ConnectContext closed:", c.GetConnectId())
+}
+
+func (t *TcpServer) GetConnect(connectId string) IConnectContext {
+	if connectId == "" {
+		return nil
+	}
+	if v, ok := t.clients.Load(connectId); ok {
+		if cc, ok2 := v.(*ConnectContext); ok2 {
+			return cc
+		}
+	}
+	return nil
+}
+
 func (t *TcpServer) Start(addr string) {
 	if t.Decoder == nil {
 		t.Decoder = &DefaultDecoder{}
@@ -116,22 +154,10 @@ func (t *TcpServer) OnSystemExit() {
 
 	// 关闭所有连接
 	t.clients.Range(func(key, value any) bool {
-		t.CloseContext(value.(*ConnectContext))
+		t.RemoveConnect(value.(*ConnectContext))
 		return true
 	})
 	logger.Info("TcpServer released")
-}
-
-func (t *TcpServer) GetConnectContext(connectId string) IConnectContext {
-	if connectId == "" {
-		return nil
-	}
-	if v, ok := t.clients.Load(connectId); ok {
-		if cc, ok2 := v.(*ConnectContext); ok2 {
-			return cc
-		}
-	}
-	return nil
 }
 
 func handleConnection(_ context.Context, conn net.Conn, t *TcpServer) {
@@ -163,14 +189,14 @@ func handleConnection(_ context.Context, conn net.Conn, t *TcpServer) {
 		BufPool:               t.BufPool,
 		ServerFramer:          t.Framer,
 	}
-	t.clients.Store(client.ConnectId.String(), client)
+	t.AddConnect(client)
 	logger.Debug("New client connected:", conn.RemoteAddr(), ", ConnectId:", client.ConnectId)
 
 	if t.SessionHandler != nil {
 		t.SessionHandler.OnAccept(client)
 	}
 
-	defer t.CloseContext(client)
+	defer t.RemoveConnect(client)
 
 	for client.Running && atomic.LoadInt32(&t.running) == 1 {
 		// 用 ReadDeadline 控 idle（你的策略：超时=断开）
@@ -215,28 +241,6 @@ func handleConnection(_ context.Context, conn net.Conn, t *TcpServer) {
 			dataMessage.Close()
 		}()
 	}
-}
-
-func (t *TcpServer) CloseContext(connectContext IConnectContext) {
-	if connectContext == nil {
-		return
-	}
-	// 幂等：只有第一次删除成功才继续收尾
-	if _, loaded := t.clients.LoadAndDelete(connectContext.GetConnectId()); !loaded {
-		return
-	}
-	client, ok := connectContext.(*ConnectContext)
-	if !ok {
-		return
-	}
-
-	client.Running = false
-	_ = client.Conn.Close()
-
-	if t.SessionHandler != nil {
-		t.SessionHandler.OnClose(connectContext)
-	}
-	logger.Debug("ConnectContext closed:", connectContext.GetConnectId())
 }
 
 func printMessageHandler() {

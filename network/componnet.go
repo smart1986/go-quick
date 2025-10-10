@@ -19,4 +19,10 @@ type (
 	IConnectIdentifyParser interface {
 		ParseConnectIdentify(c IConnectContext) (interface{}, error)
 	}
+
+	IConnectManager interface {
+		AddConnect(c IConnectContext)
+		RemoveConnect(c IConnectContext)
+		GetConnect(connectId string) IConnectContext
+	}
 )
